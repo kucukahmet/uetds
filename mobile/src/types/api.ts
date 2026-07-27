@@ -340,6 +340,14 @@ export type SyncSummaryResponse = UetdsSubmitOperation & {
   message: string;
 };
 
+export type CancelUetdsResponse = UetdsSubmitOperation & {
+  remote_cancelled?: boolean;
+  summary_success?: boolean;
+  summary_sonuc_kodu?: string;
+  summary_sonuc_mesaji?: string;
+  summary_remote_status?: "submitted" | "cancelled" | "unknown";
+};
+
 export type TripUpdatePayload = Partial<{
   description: string;
   vehicle: string;

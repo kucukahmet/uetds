@@ -81,6 +81,8 @@ export default function TripDetailScreen() {
       ]);
       if (result.success) {
         Alert.alert("Sefer iptal edildi", result.sonuc_mesaji || "UETDS seferi iptal edildi. Kayıt sistemde iptal olarak kalacak.");
+      } else if (result.summary_remote_status === "submitted") {
+        Alert.alert("İptal doğrulanmadı", result.sonuc_mesaji || "Bakanlık özeti seferi hâlâ geçerli gösteriyor.");
       } else {
         Alert.alert("İptal başarısız", result.sonuc_mesaji || "UETDS sefer iptali tamamlanamadı.");
       }

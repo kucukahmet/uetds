@@ -1296,6 +1296,10 @@ def test_uetds_trip_cannot_be_deleted_and_can_be_cancelled(monkeypatch):
         return UETDSResponse("seferIptal", True, "0", "OK", {})
 
     monkeypatch.setattr("uetds.client.UetdsAriziClient.sefer_iptal", fake_cancel)
+    monkeypatch.setattr(
+        "uetds.client.UetdsAriziClient.bildirim_ozeti",
+        lambda self, reference_no: UETDSResponse("bildirimOzeti", True, "0", "OK", {"seferDurumAciklama": "İPTAL"}),
+    )
     client = auth_client(user, company)
 
     delete_response = client.delete(f"/api/v1/trips/{trip.id}/")
@@ -1307,6 +1311,7 @@ def test_uetds_trip_cannot_be_deleted_and_can_be_cancelled(monkeypatch):
     assert delete_response.data["message"]["trip"] == "UETDS'ye gönderilmiş sefer silinemez. Seferi UETDS iptal akışıyla iptal edin."
     assert cancel_response.status_code == 200
     assert cancel_response.data["success"] is True
+    assert cancel_response.data["summary_remote_status"] == "cancelled"
     assert seen == {"reference_no": "123456", "reason": "Müşteri iptali"}
     assert trip.status == Trip.Status.CANCELLED
     assert detail_response.data["uetds_sync_status"] == "cancelled"
@@ -1335,6 +1340,10 @@ def test_cancel_trip_marks_cancelled_when_uetds_says_already_cancelled(monkeypat
         "uetds.client.UetdsAriziClient.sefer_iptal",
         lambda self, reference_no, reason: UETDSResponse("seferIptal", False, "11", "İptal Edilen Sefer Üzerinde İşlem Yapılamaz!", {}),
     )
+    monkeypatch.setattr(
+        "uetds.client.UetdsAriziClient.bildirim_ozeti",
+        lambda self, reference_no: UETDSResponse("bildirimOzeti", True, "0", "OK", {"seferDurumAciklama": "İPTAL"}),
+    )
 
     response = auth_client(user, company).post(f"/api/v1/trips/{trip.id}/cancel-uetds/", {"reason": "Müşteri iptali"}, format="json")
 
@@ -1342,7 +1351,42 @@ def test_cancel_trip_marks_cancelled_when_uetds_says_already_cancelled(monkeypat
     assert response.status_code == 200
     assert response.data["success"] is True
     assert response.data["remote_cancelled"] is True
+    assert response.data["summary_remote_status"] == "cancelled"
     assert trip.status == Trip.Status.CANCELLED
+
+
+def test_cancel_trip_does_not_mark_cancelled_until_summary_confirms(monkeypatch):
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    trip = _trip(company, user, vehicle, driver)
+    trip.status = Trip.Status.SUBMITTED
+    trip.uetds_reference_no = "123456"
+    trip.uetds_environment = "test"
+    trip.save(update_fields=["status", "uetds_reference_no", "uetds_environment"])
+    credential = UETDSCredential(company=company, environment="test", endpoint_url="https://example.test")
+    credential.set_username("user")
+    credential.set_password("pass")
+    credential.save()
+
+    monkeypatch.setattr(
+        "uetds.client.UetdsAriziClient.sefer_iptal",
+        lambda self, reference_no, reason: UETDSResponse("seferIptal", True, "0", "İŞLEM BAŞARILI", {}),
+    )
+    monkeypatch.setattr(
+        "uetds.client.UetdsAriziClient.bildirim_ozeti",
+        lambda self, reference_no: UETDSResponse("bildirimOzeti", True, "0", "OK", {"seferDurumAciklama": "GEÇERLİ"}),
+    )
+
+    response = auth_client(user, company).post(f"/api/v1/trips/{trip.id}/cancel-uetds/", {"reason": "Müşteri iptali"}, format="json")
+
+    trip.refresh_from_db()
+    assert response.status_code == 200
+    assert response.data["success"] is False
+    assert response.data["summary_remote_status"] == "submitted"
+    assert trip.status == Trip.Status.CANCEL_REQUESTED
 
 
 def test_cancel_trip_checks_summary_when_cancel_fails_after_time_limit(monkeypatch):

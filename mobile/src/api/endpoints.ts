@@ -2,6 +2,7 @@ import { apiBinaryRequest, apiRequest } from "@/lib/api";
 import type {
   Company,
   CompanySettings,
+  CancelUetdsResponse,
   LocationReference,
   Paginated,
   Passenger,
@@ -100,7 +101,7 @@ export const endpoints = {
       })
     }),
   cancelUetds: (tripId: string, reason = "Mobil uygulamadan iptal") =>
-    apiRequest<{ operation: string; success: boolean; sonuc_kodu: string; sonuc_mesaji: string }>(`/trips/${tripId}/cancel-uetds/`, {
+    apiRequest<CancelUetdsResponse>(`/trips/${tripId}/cancel-uetds/`, {
       method: "POST",
       body: JSON.stringify({ reason, confirm_live_submission: true })
     }),

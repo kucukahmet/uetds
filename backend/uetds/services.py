@@ -382,34 +382,41 @@ def _sync_summary_message(response, remote_status, sync_status, updated):
 def cancel_trip(trip, user, reason, environment, confirm_live_submission=False):
     if not trip.uetds_reference_no:
         raise ValidationError({"trip": "UETDS referansı olmayan sefer silinmeli, iptal edilemez."})
-    if trip.status == "cancelled":
-        return {
-            "operation": "seferIptal",
-            "success": True,
-            "sonuc_kodu": "ALREADY_CANCELLED",
-            "sonuc_mesaji": "Sefer zaten iptal edilmiş.",
-        }
     ensure_live_guard(user, trip.company, environment, "seferIptal", confirm_live_submission)
     credential = get_credential(trip.company, environment)
     client = UetdsAriziClient(credential)
     response = client.sefer_iptal(trip.uetds_reference_no, reason)
     log_response(trip.company, trip, response, environment)
     result = _operation_result(response)
-    if not response.success and not result["remote_cancelled"]:
-        summary_response = client.bildirim_ozeti(trip.uetds_reference_no)
-        log_response(trip.company, trip, summary_response, environment)
-        summary_remote_status = _remote_status_from_summary(summary_response)
-        result["summary_remote_status"] = summary_remote_status
-        if summary_response.success and summary_remote_status == "cancelled":
-            result["remote_cancelled"] = True
-            result["success"] = True
-            result["sonuc_mesaji"] = "UETDS iptal isteği hata döndü; özet seferi iptal gösterdiği için kayıt iptal olarak güncellendi."
-    if response.success or result["remote_cancelled"]:
+
+    summary_response = client.bildirim_ozeti(trip.uetds_reference_no)
+    log_response(trip.company, trip, summary_response, environment)
+    summary_remote_status = _remote_status_from_summary(summary_response)
+    result.update(
+        {
+            "summary_success": summary_response.success,
+            "summary_sonuc_kodu": summary_response.sonuc_kodu,
+            "summary_sonuc_mesaji": summary_response.sonuc_mesaji,
+            "summary_remote_status": summary_remote_status,
+        }
+    )
+
+    if summary_response.success and summary_remote_status == "cancelled":
+        result["remote_cancelled"] = True
+        result["success"] = True
+        result["sonuc_mesaji"] = "UETDS sefer iptali Bakanlık özetiyle doğrulandı."
         trip.status = "cancelled"
         trip.save(update_fields=["status", "updated_at"])
-    if result["remote_cancelled"] and not result["success"]:
-        result["success"] = True
-        result["sonuc_mesaji"] = result["sonuc_mesaji"] or "UETDS'de sefer zaten iptal görünüyor."
+    elif summary_response.success and summary_remote_status == "submitted":
+        result["success"] = False
+        result["sonuc_mesaji"] = "UETDS iptal isteği alındı ancak Bakanlık özeti seferi hâlâ geçerli gösteriyor. Biraz sonra senkronize et; hâlâ geçerliyse tekrar iptal isteği gönder."
+        trip.status = "cancel_requested" if response.success or result["remote_cancelled"] else "submitted"
+        trip.save(update_fields=["status", "updated_at"])
+    elif response.success or result["remote_cancelled"]:
+        result["success"] = False
+        result["sonuc_mesaji"] = "UETDS iptal isteği alındı ancak Bakanlık özetiyle doğrulanamadı. Biraz sonra UETDS'den senkronize et."
+        trip.status = "cancel_requested"
+        trip.save(update_fields=["status", "updated_at"])
     return result
 
 
