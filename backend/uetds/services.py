@@ -271,7 +271,8 @@ def submit_trip(trip, user, environment, idempotency_key="", confirm_live_submis
         operation_results.append(_operation_result(response))
         failed = failed or not response.success
 
-    trip.status = "partial_failed" if trip.uetds_reference_no and failed else "failed" if failed else "submitted"
+    remote_cancelled = any(operation.get("remote_cancelled") for operation in operation_results)
+    trip.status = "cancelled" if remote_cancelled else "partial_failed" if trip.uetds_reference_no and failed else "failed" if failed else "submitted"
     update_fields = ["status", "updated_at"]
     if not failed:
         trip.uetds_last_submitted_at = timezone.now()
@@ -390,12 +391,26 @@ def cancel_trip(trip, user, reason, environment, confirm_live_submission=False):
         }
     ensure_live_guard(user, trip.company, environment, "seferIptal", confirm_live_submission)
     credential = get_credential(trip.company, environment)
-    response = UetdsAriziClient(credential).sefer_iptal(trip.uetds_reference_no, reason)
+    client = UetdsAriziClient(credential)
+    response = client.sefer_iptal(trip.uetds_reference_no, reason)
     log_response(trip.company, trip, response, environment)
-    if response.success:
+    result = _operation_result(response)
+    if not response.success and not result["remote_cancelled"]:
+        summary_response = client.bildirim_ozeti(trip.uetds_reference_no)
+        log_response(trip.company, trip, summary_response, environment)
+        summary_remote_status = _remote_status_from_summary(summary_response)
+        result["summary_remote_status"] = summary_remote_status
+        if summary_response.success and summary_remote_status == "cancelled":
+            result["remote_cancelled"] = True
+            result["success"] = True
+            result["sonuc_mesaji"] = "UETDS iptal isteği hata döndü; özet seferi iptal gösterdiği için kayıt iptal olarak güncellendi."
+    if response.success or result["remote_cancelled"]:
         trip.status = "cancelled"
         trip.save(update_fields=["status", "updated_at"])
-    return _operation_result(response)
+    if result["remote_cancelled"] and not result["success"]:
+        result["success"] = True
+        result["sonuc_mesaji"] = result["sonuc_mesaji"] or "UETDS'de sefer zaten iptal görünüyor."
+    return result
 
 
 def validate_trip_identity_numbers(trip):
@@ -413,7 +428,23 @@ def _operation_result(response):
         "success": response.success,
         "sonuc_kodu": response.sonuc_kodu,
         "sonuc_mesaji": response.sonuc_mesaji,
+        "remote_cancelled": response_indicates_remote_cancelled(response),
     }
+
+
+def response_indicates_remote_cancelled(response):
+    text = " ".join([response.sonuc_mesaji or "", *_summary_values(response.data or {})])
+    haystack = _normalize_summary_text(text)
+    return any(
+        marker in haystack
+        for marker in (
+            "iptal edilen sefer",
+            "iptal edilmis sefer",
+            "sefer zaten iptal",
+            "sefer iptal edilmistir",
+            "sefer iptal edildi",
+        )
+    )
 
 
 def _run_initial_children_flow(trip, client, environment, operation_results):

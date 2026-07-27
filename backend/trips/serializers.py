@@ -38,7 +38,7 @@ UETDS_OPERATION_ACTIONS = {
     "yolcuEkleCoklu": "Yolcu kimlik/pasaport, ülke, cinsiyet ve koltuk bilgilerini kontrol edip tekrar UETDS'ye gönder.",
     "yolcuIptal": "Yolcu listesindeki değişikliği kontrol edip tekrar UETDS'ye gönder.",
     "bildirimOzeti": "UETDS kaydı oluşmuş olabilir; önce UETDS'den senkronize et, gerekirse tekrar gönder.",
-    "seferIptal": "İptal sonucunu kontrol et; sefer UETDS'de hâlâ aktifse tekrar iptal isteği gönder.",
+    "seferIptal": "Bakanlık webinde sefer iptal görünüyorsa UETDS'den senkronize et. Hâlâ aktif görünüyorsa tarih süresi nedeniyle manuel kontrol gerekir.",
 }
 
 
@@ -244,6 +244,8 @@ class TripSerializer(serializers.ModelSerializer):
         return "Önceki gönderim var; UETDS ile güncellik durumu doğrulanmalı."
 
     def get_uetds_last_error(self, obj):
+        if obj.status not in {"failed", "partial_failed", "cancel_requested"}:
+            return None
         failed_logs = getattr(obj, "failed_uetds_logs", None)
         log = failed_logs[0] if failed_logs else obj.uetds_logs.filter(success=False).order_by("-created_at").first()
         if not log:
