@@ -1356,6 +1356,36 @@ def test_sync_summary_marks_trip_cancelled_when_uetds_summary_is_cancelled(monke
     assert trip.status == Trip.Status.CANCELLED
 
 
+def test_trip_response_includes_actionable_uetds_last_error():
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    trip = _trip(company, user, vehicle, driver)
+    trip.status = Trip.Status.PARTIAL_FAILED
+    trip.uetds_reference_no = "123456"
+    trip.save(update_fields=["status", "uetds_reference_no"])
+    UETDSOperationLog.objects.create(
+        company=company,
+        trip=trip,
+        operation="yolcuEkleCoklu",
+        environment="test",
+        success=False,
+        uetds_sonuc_kodu="34",
+        uetds_sonuc_mesaji="Yolcu kimlik bilgisi hatalı.",
+    )
+
+    response = auth_client(user, company).get(f"/api/v1/trips/{trip.id}/")
+
+    assert response.status_code == 200
+    assert response.data["uetds_last_error"]["operation_label"] == "Yolcu gönderimi"
+    assert response.data["uetds_last_error"]["message"] == "Yolcu kimlik bilgisi hatalı."
+    assert response.data["uetds_last_error"]["sonuc_kodu"] == "34"
+    assert "Yolcu kimlik/pasaport" in response.data["uetds_last_error"]["action"]
+    assert response.data["uetds_sync_message"] == "Yolcu gönderimi tamamlanamadı: Yolcu kimlik bilgisi hatalı."
+
+
 def test_live_submit_is_disabled_in_test_only_installation():
     user = make_user()
     company = make_company()

@@ -57,6 +57,11 @@ export default function TripsScreen() {
                   UETDS güncellemesi bekliyor
                 </AppText>
               ) : null}
+              {trip.uetds_last_error ? (
+                <AppText variant="labelMd" color={colors.error}>
+                  {trip.uetds_last_error.operation_label}: {trip.uetds_last_error.message}
+                </AppText>
+              ) : null}
             </View>
             <Badge status={trip.status} />
           </View>

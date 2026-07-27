@@ -12,6 +12,36 @@ from trips.models import SavedLocation, SavedRoute, Trip, TripGroup, TripPasseng
 from uetds.services import trip_uetds_sync_status, validate_environment as validate_uetds_environment
 
 
+UETDS_OPERATION_LABELS = {
+    "seferEkle": "Sefer kaydı",
+    "seferGuncelle": "Sefer güncellemesi",
+    "seferPlakaDegistir": "Araç/plaka güncellemesi",
+    "seferGrupEkle": "Rota/grup kaydı",
+    "seferGrupGuncelle": "Rota/grup güncellemesi",
+    "personelEkle": "Şoför/personel gönderimi",
+    "personelIptal": "Şoför/personel iptali",
+    "yolcuEkleCoklu": "Yolcu gönderimi",
+    "yolcuIptal": "Yolcu iptali",
+    "bildirimOzeti": "UETDS özet kontrolü",
+    "seferIptal": "Sefer iptali",
+}
+
+
+UETDS_OPERATION_ACTIONS = {
+    "seferEkle": "Araç, şoför, tarih ve rota bilgilerini kontrol edip tekrar UETDS'ye gönder.",
+    "seferGuncelle": "Sefer ana bilgilerini kontrol edip güncelle ve tekrar UETDS'ye gönder.",
+    "seferPlakaDegistir": "Seçilen aracın plakasını/yetki belgesini kontrol edip tekrar UETDS'ye gönder.",
+    "seferGrupEkle": "Rota, adres detayı, grup ve ücret bilgilerini kontrol edip tekrar UETDS'ye gönder.",
+    "seferGrupGuncelle": "Rota, adres detayı, grup ve ücret bilgilerini kontrol edip tekrar UETDS'ye gönder.",
+    "personelEkle": "Şoför bilgilerini ve SRC/mesleki yeterlilik durumunu kontrol edip tekrar UETDS'ye gönder.",
+    "personelIptal": "Şoför değişikliğini kontrol edip tekrar UETDS'ye gönder.",
+    "yolcuEkleCoklu": "Yolcu kimlik/pasaport, ülke, cinsiyet ve koltuk bilgilerini kontrol edip tekrar UETDS'ye gönder.",
+    "yolcuIptal": "Yolcu listesindeki değişikliği kontrol edip tekrar UETDS'ye gönder.",
+    "bildirimOzeti": "UETDS kaydı oluşmuş olabilir; önce UETDS'den senkronize et, gerekirse tekrar gönder.",
+    "seferIptal": "İptal sonucunu kontrol et; sefer UETDS'de hâlâ aktifse tekrar iptal isteği gönder.",
+}
+
+
 def normalize_gender(value):
     normalized = (value or "").strip().lower()
     if normalized in {"e", "erkek", "m", "male"}:
@@ -137,6 +167,7 @@ class TripSerializer(serializers.ModelSerializer):
     uetds_sync_status = serializers.SerializerMethodField()
     uetds_has_unsent_changes = serializers.SerializerMethodField()
     uetds_sync_message = serializers.SerializerMethodField()
+    uetds_last_error = serializers.SerializerMethodField()
 
     class Meta:
         model = Trip
@@ -165,6 +196,7 @@ class TripSerializer(serializers.ModelSerializer):
             "uetds_has_unsent_changes",
             "uetds_last_submitted_at",
             "uetds_sync_message",
+            "uetds_last_error",
             "groups",
             "passengers",
             "personnel",
@@ -181,6 +213,7 @@ class TripSerializer(serializers.ModelSerializer):
             "uetds_has_unsent_changes",
             "uetds_last_submitted_at",
             "uetds_sync_message",
+            "uetds_last_error",
             "created_at",
             "updated_at",
         ]
@@ -192,6 +225,11 @@ class TripSerializer(serializers.ModelSerializer):
         return self.get_uetds_sync_status(obj) in {"update_required", "local_draft", "unknown"}
 
     def get_uetds_sync_message(self, obj):
+        if obj.status in {"failed", "partial_failed"}:
+            last_error = self.get_uetds_last_error(obj)
+            if last_error:
+                return f"{last_error['operation_label']} tamamlanamadı: {last_error['message']}"
+            return "UETDS gönderimi tamamlanamadı. Logları kontrol edip tekrar gönder."
         status = self.get_uetds_sync_status(obj)
         if status == "not_submitted":
             return "Bu sefer henüz UETDS'ye gönderilmedi."
@@ -204,6 +242,22 @@ class TripSerializer(serializers.ModelSerializer):
         if status == "cancelled":
             return "Sefer UETDS'de iptal edildi."
         return "Önceki gönderim var; UETDS ile güncellik durumu doğrulanmalı."
+
+    def get_uetds_last_error(self, obj):
+        failed_logs = getattr(obj, "failed_uetds_logs", None)
+        log = failed_logs[0] if failed_logs else obj.uetds_logs.filter(success=False).order_by("-created_at").first()
+        if not log:
+            return None
+        message = log.uetds_sonuc_mesaji or "UETDS hata mesajı dönmedi. Log detayını kontrol et."
+        return {
+            "id": str(log.id),
+            "operation": log.operation,
+            "operation_label": UETDS_OPERATION_LABELS.get(log.operation, log.get_operation_display() or log.operation),
+            "sonuc_kodu": log.uetds_sonuc_kodu,
+            "message": message,
+            "action": UETDS_OPERATION_ACTIONS.get(log.operation, "Bilgileri kontrol edip tekrar UETDS'ye gönder."),
+            "created_at": log.created_at.isoformat(),
+        }
 
 
 class TripUpdateSerializer(serializers.ModelSerializer):

@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Prefetch
 from django.http import HttpResponse
 from rest_framework import permissions, status
 from rest_framework.views import APIView
@@ -21,6 +22,7 @@ from trips.serializers import (
     TripUpdateSerializer,
 )
 from uetds.services import cancel_trip, get_company_default_environment, submit_trip, sync_trip_summary
+from uetds.models import UETDSOperationLog
 
 
 class PDFRenderer(BaseRenderer):
@@ -99,6 +101,7 @@ class TripViewSet(TenantModelViewSet):
         "trip_passengers__passenger",
         "trip_passengers__group",
         "trip_personnel__personnel",
+        Prefetch("uetds_logs", queryset=UETDSOperationLog.objects.filter(success=False).order_by("-created_at"), to_attr="failed_uetds_logs"),
     )
     serializer_class = TripSerializer
     search_fields = [

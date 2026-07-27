@@ -192,6 +192,23 @@ export default function TripDetailScreen() {
           />
         ) : null}
       </Card>
+      {trip.uetds_last_error ? (
+        <Card style={styles.failedCard}>
+          <View style={styles.syncHeader}>
+            <AppText variant="titleLg" color={colors.error}>
+              UETDS Hatası
+            </AppText>
+            <Badge status="failed" label={trip.uetds_last_error.operation_label} />
+          </View>
+          <AppText color={colors.error}>{trip.uetds_last_error.message}</AppText>
+          {trip.uetds_last_error.sonuc_kodu ? (
+            <AppText variant="labelMd" color={colors.textMuted}>
+              Hata kodu: {trip.uetds_last_error.sonuc_kodu}
+            </AppText>
+          ) : null}
+          <AppText color={colors.text}>Ne yapmalı: {trip.uetds_last_error.action}</AppText>
+        </Card>
+      ) : null}
       {isLocked ? (
         <Card style={styles.lockedCard}>
           <AppText variant="titleLg" color={colors.error}>
@@ -200,7 +217,7 @@ export default function TripDetailScreen() {
           <AppText color={colors.error}>İptal sürecindeki UETDS seferi düzenlenemez.</AppText>
         </Card>
       ) : null}
-      {trip.status === "failed" ? (
+      {trip.status === "failed" && !trip.uetds_last_error ? (
         <Card style={styles.failedCard}>
           <AppText variant="titleLg" color={colors.error}>
             UETDS gönderimi başarısız

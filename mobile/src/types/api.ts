@@ -175,6 +175,16 @@ export type TripStatus =
 
 export type TripUetdsSyncStatus = "not_submitted" | "synced" | "update_required" | "local_draft" | "unknown" | "cancelled";
 
+export type TripUetdsLastError = {
+  id: string;
+  operation: string;
+  operation_label: string;
+  sonuc_kodu: string;
+  message: string;
+  action: string;
+  created_at: string;
+};
+
 export type Trip = {
   id: string;
   status: TripStatus;
@@ -200,6 +210,7 @@ export type Trip = {
   uetds_has_unsent_changes: boolean;
   uetds_last_submitted_at: string | null;
   uetds_sync_message: string;
+  uetds_last_error: TripUetdsLastError | null;
   groups: TripGroup[];
   passengers: Array<{ id: string; passenger: Passenger; group_id: string | null; status: string; seat_no: string }>;
 };
