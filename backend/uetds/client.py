@@ -184,7 +184,6 @@ class UetdsAriziClient:
             "seferAciklama": trip.description or trip.route_note,
             "hareketTarihi": departure_at.date().isoformat(),
             "hareketSaati": departure_at.strftime("%H:%M"),
-            "aracTelefonu": trip.driver.phone if trip.driver_id else "",
             "firmaSeferNo": trip.firm_trip_no or str(trip.id),
             "seferBitisTarihi": arrival_at.date().isoformat(),
             "seferBitisSaati": arrival_at.strftime("%H:%M"),

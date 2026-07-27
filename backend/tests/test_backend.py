@@ -1798,7 +1798,7 @@ def test_uetds_credentials_force_live_endpoint_when_live_enabled(settings):
     assert credential.last_result == "pending"
 
 
-def test_uetds_trip_payload_uses_driver_phone_for_vehicle_phone_field():
+def test_uetds_trip_payload_omits_driver_phone_for_vehicle_phone_field():
     user = make_user()
     company = make_company()
     make_membership(user, company)
@@ -1819,7 +1819,7 @@ def test_uetds_trip_payload_uses_driver_phone_for_vehicle_phone_field():
 
     payload = UetdsAriziClient(credential)._sefer_payload(trip)
 
-    assert payload["aracTelefonu"] == "05435339454"
+    assert "aracTelefonu" not in payload
 
 
 def test_seed_uetds_test_creates_test_ready_data():
