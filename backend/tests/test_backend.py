@@ -863,37 +863,6 @@ def test_quick_create_builds_trip_vehicle_driver_and_passengers():
     assert Personnel.objects.get(company=company).identity_no == "11111111110"
 
 
-def test_quick_create_generates_readable_firm_trip_no_when_missing():
-    user = make_user()
-    company = make_company()
-    make_membership(user, company)
-    payload = {
-        "departure_at": "2026-06-13T10:30:00+03:00",
-        "vehicle": {"plate": "34 abc 123", "seat_capacity": 16},
-        "driver": {"identity_no": "11111111110", "first_name": "Ahmet", "last_name": "Yilmaz"},
-        "route": {
-            "from": {"city": "Istanbul", "district": "Bakirkoy", "address": "Havalimani"},
-            "to": {"city": "Istanbul", "district": "Besiktas", "address": "Otel"},
-        },
-        "passengers": [
-            {
-                "first_name": "Ayse",
-                "last_name": "Demir",
-                "identity_type": "tc",
-                "identity_no": "22222222220",
-                "nationality": "TR",
-            }
-        ],
-    }
-
-    response = auth_client(user, company).post("/api/v1/trips/quick-create/", payload, format="json")
-
-    assert response.status_code == 200
-    trip = Trip.objects.get(id=response.data["trip_id"])
-    assert trip.firm_trip_no.startswith("SF-260613-")
-    assert len(trip.firm_trip_no) == len("SF-260613-") + 8
-
-
 def test_quick_create_preserves_uetds_group_personnel_and_passenger_fields():
     user = make_user()
     company = make_company("Ömer Acar Turizm")
@@ -1079,7 +1048,7 @@ def test_quick_create_uses_existing_vehicle_and_driver_ids():
     assert trip.driver == driver
 
 
-def test_duplicate_generates_new_firm_trip_no():
+def test_duplicate_clears_firm_trip_no_so_uetds_uses_new_trip_uuid():
     user = make_user()
     company = make_company("Kopya Firma")
     make_membership(user, company)
@@ -1103,8 +1072,8 @@ def test_duplicate_generates_new_firm_trip_no():
     response = auth_client(user, company).post(f"/api/v1/trips/{trip.id}/duplicate/", {}, format="json")
 
     assert response.status_code == 200
-    assert response.data["firm_trip_no"].startswith("SF-")
-    assert response.data["firm_trip_no"] != "LOCAL-001"
+    assert response.data["id"] != str(trip.id)
+    assert response.data["firm_trip_no"] == ""
 
 
 def test_trip_detail_pdf_endpoint_returns_pdf_bytes():
