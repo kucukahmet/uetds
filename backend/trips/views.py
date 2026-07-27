@@ -117,6 +117,23 @@ class TripViewSet(TenantModelViewSet):
     ordering_fields = ["departure_at", "created_at", "status"]
     required_permission = "trip:update"
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        objects = page if page is not None else queryset
+        self._sync_uetds_for_response(objects)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._sync_uetds_for_response([instance])
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+
     def perform_create(self, serializer):
         company = self.get_company()
         self.check_company_permission(company, "trip:create")
@@ -147,6 +164,41 @@ class TripViewSet(TenantModelViewSet):
 
     def _is_uetds_locked(self, trip):
         return trip.status in {"cancel_requested", "cancelled"}
+
+    def _sync_uetds_for_response(self, trips):
+        if not self._should_sync_uetds_on_read():
+            return
+        max_items = self._uetds_read_sync_limit()
+        synced = 0
+        for trip in list(trips):
+            if synced >= max_items:
+                return
+            if not self._can_sync_trip_on_read(trip):
+                continue
+            environment = trip.uetds_environment or get_company_default_environment(trip.company)
+            try:
+                sync_trip_summary(trip, environment)
+            except Exception:
+                continue
+            synced += 1
+
+    def _should_sync_uetds_on_read(self):
+        value = str(self.request.query_params.get("sync_uetds", "")).lower()
+        return value in {"1", "true", "yes", "on"}
+
+    def _uetds_read_sync_limit(self):
+        try:
+            value = int(self.request.query_params.get("sync_uetds_limit", 8))
+        except (TypeError, ValueError):
+            value = 8
+        return max(1, min(value, 20))
+
+    def _can_sync_trip_on_read(self, trip):
+        return bool(trip.uetds_reference_no) and trip.status in {
+            Trip.Status.SUBMITTED,
+            Trip.Status.PARTIAL_FAILED,
+            Trip.Status.CANCEL_REQUESTED,
+        }
 
     @action(detail=False, methods=["post"], url_path="quick-create")
     def quick_create(self, request):

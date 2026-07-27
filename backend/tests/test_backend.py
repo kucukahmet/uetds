@@ -2054,6 +2054,64 @@ def test_submit_uetds_business_failure_returns_conflict(monkeypatch):
     assert trip.status == "failed"
 
 
+def test_trip_list_syncs_uetds_status_when_requested(monkeypatch):
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="48AAL247", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    trip = _trip(company, user, vehicle, driver)
+    trip.status = "submitted"
+    trip.uetds_reference_no = "2607276720694504"
+    trip.uetds_environment = "test"
+    trip.save(update_fields=["status", "uetds_reference_no", "uetds_environment", "updated_at"])
+
+    def fake_sync(trip_to_sync, environment):
+        assert str(trip_to_sync.id) == str(trip.id)
+        assert environment == "test"
+        trip_to_sync.status = "cancelled"
+        trip_to_sync.save(update_fields=["status", "updated_at"])
+        return {"success": True, "remote_status": "cancelled"}
+
+    monkeypatch.setattr("trips.views.sync_trip_summary", fake_sync)
+
+    response = auth_client(user, company).get("/api/v1/trips/?sync_uetds=1")
+
+    trip.refresh_from_db()
+    assert response.status_code == 200
+    assert response.data["results"][0]["status"] == "cancelled"
+    assert trip.status == "cancelled"
+
+
+def test_trip_detail_syncs_uetds_status_when_requested(monkeypatch):
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="48AAL247", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    trip = _trip(company, user, vehicle, driver)
+    trip.status = "submitted"
+    trip.uetds_reference_no = "2607276720694504"
+    trip.uetds_environment = "test"
+    trip.save(update_fields=["status", "uetds_reference_no", "uetds_environment", "updated_at"])
+
+    def fake_sync(trip_to_sync, environment):
+        assert str(trip_to_sync.id) == str(trip.id)
+        assert environment == "test"
+        trip_to_sync.status = "cancelled"
+        trip_to_sync.save(update_fields=["status", "updated_at"])
+        return {"success": True, "remote_status": "cancelled"}
+
+    monkeypatch.setattr("trips.views.sync_trip_summary", fake_sync)
+
+    response = auth_client(user, company).get(f"/api/v1/trips/{trip.id}/?sync_uetds=1")
+
+    trip.refresh_from_db()
+    assert response.status_code == 200
+    assert response.data["status"] == "cancelled"
+    assert trip.status == "cancelled"
+
+
 def _trip(company, user, vehicle, driver):
     from trips.models import Trip, TripPassenger, TripPersonnel
 

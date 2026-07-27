@@ -69,8 +69,8 @@ export const endpoints = {
   routes: (query = "") => apiRequest<Paginated<SavedRoute>>(`/routes/${formatListQuery(query)}`),
   createRoute: (data: Partial<SavedRoute>) => apiRequest<SavedRoute>("/routes/", { method: "POST", body: JSON.stringify(data) }),
 
-  trips: (query = "") => apiRequest<Paginated<Trip>>(`/trips/${query}`),
-  trip: (id: string) => apiRequest<Trip>(`/trips/${id}/`),
+  trips: (query = "") => apiRequest<Paginated<Trip>>(`/trips/${appendQueryParam(formatListQuery(query), "sync_uetds=1")}`),
+  trip: (id: string) => apiRequest<Trip>(`/trips/${id}/${appendQueryParam("", "sync_uetds=1")}`),
   updateTrip: (id: string, data: TripUpdatePayload) =>
     apiRequest<Trip>(`/trips/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteTrip: (id: string) => apiRequest<void>(`/trips/${id}/`, { method: "DELETE" }),
@@ -115,4 +115,11 @@ function formatListQuery(query: string) {
     return "";
   }
   return query.startsWith("?") ? query : `?search=${encodeURIComponent(query)}`;
+}
+
+function appendQueryParam(query: string, param: string) {
+  if (!query) {
+    return `?${param}`;
+  }
+  return `${query}${query.includes("?") ? "&" : "?"}${param}`;
 }
