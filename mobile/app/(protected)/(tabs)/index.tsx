@@ -108,7 +108,7 @@ function uetdsStatusLabel(status?: UetdsStatus["test"]) {
     return "-";
   }
   if (status.status === "verified") {
-    return "Hazır";
+    return "Bağlı";
   }
   if (status.status === "pending") {
     return "Bekliyor";

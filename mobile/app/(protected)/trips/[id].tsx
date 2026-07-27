@@ -428,7 +428,7 @@ function syncBadgeLabel(status: string) {
   if (status === "cancelled") return "İptal";
   if (status === "synced") return "Güncel";
   if (status === "update_required") return "Güncelleme Bekliyor";
-  if (status === "local_draft") return "Local Taslak";
+  if (status === "local_draft") return "Yerel Taslak";
   if (status === "unknown") return "Kontrol Gerek";
   return "Gönderilmedi";
 }

@@ -16,7 +16,7 @@ import { colors, radius, spacing } from "@/theme/tokens";
 
 const filters = [
   { label: "Tümü", query: "" },
-  { label: "Hazır", query: "?status=ready" },
+  { label: "Gönderilmedi", query: "?status=ready" },
   { label: "Gönderildi", query: "?status=submitted" },
   { label: "Hatalı", query: "?status=failed" },
   { label: "İptal", query: "?status=cancelled" }
