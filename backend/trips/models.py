@@ -1,5 +1,8 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from common.models import CompanyScopedModel
 
@@ -93,6 +96,16 @@ class Trip(CompanyScopedModel):
 
     def __str__(self):
         return f"{self.departure_city} -> {self.arrival_city} @ {self.departure_at}"
+
+    def save(self, *args, **kwargs):
+        if self.id is None:
+            self.id = uuid.uuid4()
+        if not self.firm_trip_no:
+            departure_at = self.departure_at or timezone.now()
+            if timezone.is_aware(departure_at):
+                departure_at = timezone.localtime(departure_at)
+            self.firm_trip_no = f"SF-{departure_at:%y%m%d}-{str(self.id)[:8].upper()}"
+        super().save(*args, **kwargs)
 
 
 class TripGroup(CompanyScopedModel):

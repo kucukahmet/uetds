@@ -190,6 +190,22 @@ export default function TripDetailScreen() {
         <AppText color={syncTextColor(trip.uetds_sync_status)}>{trip.uetds_sync_message || syncFallbackMessage(trip.uetds_sync_status)}</AppText>
         {trip.uetds_reference_no ? <AppText color={colors.textMuted}>Referans no: {trip.uetds_reference_no}</AppText> : null}
         {trip.uetds_last_submitted_at ? <AppText color={colors.textMuted}>Son gönderim: {formatDateTime(trip.uetds_last_submitted_at)}</AppText> : null}
+        {trip.uetds_reference_no ? (
+          <View style={styles.lookupBlock}>
+            <AppText variant="labelMd" color={colors.textSubtle}>
+              Bakanlık panelinde arama
+            </AppText>
+            <AppText selectable variant="labelMd" color={colors.textMuted}>
+              UETDS referans no: {trip.uetds_reference_no}
+            </AppText>
+            <AppText selectable variant="labelMd" color={colors.textMuted}>
+              Firma sefer no: {trip.firm_trip_no || trip.id}
+            </AppText>
+            <AppText variant="labelMd" color={colors.textMuted}>
+              Sefer tarihi: {formatDateTime(trip.departure_at)}
+            </AppText>
+          </View>
+        ) : null}
         {hasUetdsSubmission ? (
           <Button
             label="UETDS'den Senkronize Et"
@@ -324,6 +340,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     gap: spacing.sm
+  },
+  lookupBlock: {
+    borderTopColor: colors.divider,
+    borderTopWidth: 1,
+    gap: 3,
+    paddingTop: spacing.sm
   },
   systemIdBlock: {
     gap: 2

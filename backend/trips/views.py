@@ -171,6 +171,7 @@ class TripViewSet(TenantModelViewSet):
             source.pk = None
             source.id = None
             source.uetds_reference_no = None
+            source.firm_trip_no = ""
             source.status = "draft"
             source.created_by = request.user
             source.save()
