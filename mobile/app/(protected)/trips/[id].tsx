@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as FileSystem from "expo-file-system/legacy";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Sharing from "expo-sharing";
-import { Alert, Platform, StyleSheet, View } from "react-native";
+import { Alert, Modal, Platform, Pressable, StyleSheet, View } from "react-native";
 
 import { endpoints } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
@@ -19,8 +20,11 @@ import { getActiveCompany, useAuthStore } from "@/store/auth";
 import { colors, spacing } from "@/theme/tokens";
 import type { SubmitUetdsResponse } from "@/types/api";
 
+type ConfirmAction = "delete" | "cancel-uetds";
+
 export default function TripDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const activeCompanyId = useAuthStore((state) => state.activeCompanyId);
@@ -83,6 +87,9 @@ export default function TripDetailScreen() {
     },
     onError: (error) => {
       Alert.alert("İptal başarısız", error instanceof Error ? error.message : "UETDS sefer iptali tamamlanamadı.");
+    },
+    onSettled: () => {
+      setConfirmAction(null);
     }
   });
   const syncSummary = useMutation({
@@ -110,6 +117,9 @@ export default function TripDetailScreen() {
     },
     onError: (error) => {
       Alert.alert("Sefer silinemedi", error instanceof Error ? error.message : "Sefer silinemedi.");
+    },
+    onSettled: () => {
+      setConfirmAction(null);
     }
   });
 
@@ -125,6 +135,26 @@ export default function TripDetailScreen() {
   const canDeleteLocal = !trip.uetds_reference_no && ["draft", "ready", "failed"].includes(trip.status);
   const canCancelUetds = Boolean(trip.uetds_reference_no) && !isLocked;
   const submitLabel = submitButtonLabel(trip.status, trip.uetds_sync_status, hasUetdsSubmission);
+  const confirmDialog =
+    confirmAction === "delete"
+      ? {
+          title: "Sefer silinsin mi?",
+          message: "Bu lokal sefer kaydı uygulamadan silinecek. UETDS'ye gönderilmiş seferler bu yolla silinmez.",
+          confirmLabel: "Seferi Sil",
+          confirmIcon: "trash" as const,
+          loading: deleteTrip.isPending,
+          onConfirm: () => deleteTrip.mutate()
+        }
+      : confirmAction === "cancel-uetds"
+        ? {
+            title: "UETDS seferi iptal edilsin mi?",
+            message: "Bu işlem UETDS'ye iptal isteği gönderir. Başarılı olursa sefer uygulamada iptal olarak kalır ve silinmez.",
+            confirmLabel: "UETDS'de İptal Et",
+            confirmIcon: "close-circle" as const,
+            loading: cancelUetds.isPending,
+            onConfirm: () => cancelUetds.mutate()
+          }
+        : null;
 
   return (
     <Screen
@@ -214,12 +244,28 @@ export default function TripDetailScreen() {
           <Button label="PDF Çıktı" icon="document-text" variant="ghost" loading={downloadPdf.isPending} onPress={() => downloadPdf.mutate()} />
         ) : null}
         {canDeleteLocal ? (
-          <Button label="Seferi Sil" icon="trash" variant="danger" loading={deleteTrip.isPending} onPress={() => confirmDeleteTrip(() => deleteTrip.mutate())} />
+          <Button label="Seferi Sil" icon="trash" variant="danger" loading={deleteTrip.isPending} onPress={() => setConfirmAction("delete")} />
         ) : null}
         {canCancelUetds ? (
-          <Button label="UETDS'de İptal Et" icon="close-circle" variant="danger" loading={cancelUetds.isPending} onPress={() => confirmCancelUetds(() => cancelUetds.mutate())} />
+          <Button
+            label="UETDS'de İptal Et"
+            icon="close-circle"
+            variant="danger"
+            loading={cancelUetds.isPending}
+            onPress={() => setConfirmAction("cancel-uetds")}
+          />
         ) : null}
       </View>
+      <ConfirmDialog
+        visible={Boolean(confirmDialog)}
+        title={confirmDialog?.title || ""}
+        message={confirmDialog?.message || ""}
+        confirmLabel={confirmDialog?.confirmLabel || ""}
+        confirmIcon={confirmDialog?.confirmIcon || "trash"}
+        loading={confirmDialog?.loading || false}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={() => confirmDialog?.onConfirm()}
+      />
     </Screen>
   );
 }
@@ -254,10 +300,80 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.sm
   },
+  modalBackdrop: {
+    alignItems: "center",
+    backgroundColor: "rgba(18, 20, 28, 0.46)",
+    flex: 1,
+    justifyContent: "center",
+    padding: spacing.lg
+  },
+  modalPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.divider,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: spacing.md,
+    maxWidth: 430,
+    padding: spacing.lg,
+    width: "100%",
+    ...Platform.select({
+      web: { boxShadow: "0px 18px 48px rgba(0,0,0,0.20)" } as object,
+      default: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 14 },
+        shadowOpacity: 0.2,
+        shadowRadius: 26,
+        elevation: 8
+      }
+    })
+  },
+  modalActions: {
+    flexDirection: "row",
+    gap: spacing.sm
+  },
+  modalButton: {
+    flex: 1
+  },
   passengerRow: {
     gap: 2
   }
 });
+
+function ConfirmDialog({
+  visible,
+  title,
+  message,
+  confirmLabel,
+  confirmIcon,
+  loading,
+  onCancel,
+  onConfirm
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  confirmIcon: "trash" | "close-circle";
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal animationType="fade" transparent visible={visible} onRequestClose={loading ? undefined : onCancel}>
+      <View style={styles.modalBackdrop}>
+        <Pressable style={StyleSheet.absoluteFill} disabled={loading} onPress={onCancel} />
+        <View accessibilityRole="alert" style={styles.modalPanel}>
+          <AppText variant="titleLg">{title}</AppText>
+          <AppText color={colors.textMuted}>{message}</AppText>
+          <View style={styles.modalActions}>
+            <Button label="Vazgeç" icon="close" variant="ghost" disabled={loading} style={styles.modalButton} onPress={onCancel} />
+            <Button label={confirmLabel} icon={confirmIcon} variant="danger" loading={loading} style={styles.modalButton} onPress={onConfirm} />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 async function openPdf(bytes: ArrayBuffer, filename: string, contentType: string) {
   if (Platform.OS === "web") {
@@ -343,18 +459,4 @@ function syncFallbackMessage(status: string) {
   if (status === "update_required") return "Önceki gönderim UETDS'ye gitti; son değişiklikler için güncelle ve tekrar gönder.";
   if (status === "unknown") return "Önceki gönderim var; UETDS ile güncellik durumu doğrulanmalı.";
   return "Bu sefer henüz UETDS'ye gönderilmedi.";
-}
-
-function confirmDeleteTrip(onConfirm: () => void) {
-  Alert.alert("Sefer silinsin mi?", "Bu lokal sefer kaydı silinecek.", [
-    { text: "Vazgeç", style: "cancel" },
-    { text: "Sil", style: "destructive", onPress: onConfirm }
-  ]);
-}
-
-function confirmCancelUetds(onConfirm: () => void) {
-  Alert.alert("UETDS seferi iptal edilsin mi?", "Sefer UETDS'de iptal edilecek; kayıt uygulamada iptal olarak kalacak.", [
-    { text: "Vazgeç", style: "cancel" },
-    { text: "İptal Et", style: "destructive", onPress: onConfirm }
-  ]);
 }
