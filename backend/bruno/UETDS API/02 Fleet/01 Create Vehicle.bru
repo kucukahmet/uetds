@@ -1,0 +1,31 @@
+meta {
+  name: 01 Create Vehicle
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/vehicles/
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}
+
+body:json {
+  {
+    "plate": "34BRN001",
+    "brand": "Mercedes",
+    "model": "Sprinter",
+    "seat_capacity": 16,
+    "status": "active"
+  }
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("vehicleId", res.body.id);
+  }
+}

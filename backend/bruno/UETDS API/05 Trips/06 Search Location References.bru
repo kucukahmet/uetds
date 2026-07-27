@@ -1,0 +1,14 @@
+meta {
+  name: 06 Search Location References
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/location-references/?search=dalaman%20havalimani
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

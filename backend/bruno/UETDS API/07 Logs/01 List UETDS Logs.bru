@@ -1,0 +1,14 @@
+meta {
+  name: 01 List UETDS Logs
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/uetds/logs/
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

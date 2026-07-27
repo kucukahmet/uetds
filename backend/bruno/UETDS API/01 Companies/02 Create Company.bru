@@ -1,0 +1,29 @@
+meta {
+  name: 02 Create Company
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/companies/
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+body:json {
+  {
+    "name": "Bruno Test Turizm",
+    "tax_no": "1234567890",
+    "unet_no": "BRUNO-TEST",
+    "status": "active"
+  }
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("companyId", res.body.id);
+  }
+}

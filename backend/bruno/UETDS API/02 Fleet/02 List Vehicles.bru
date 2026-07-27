@@ -1,0 +1,14 @@
+meta {
+  name: 02 List Vehicles
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/vehicles/?search=34BRN
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

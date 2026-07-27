@@ -1,0 +1,14 @@
+meta {
+  name: 03 UETDS Check Vehicle
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/vehicles/{{vehicleId}}/uetds-check/
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

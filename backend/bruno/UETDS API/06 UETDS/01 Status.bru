@@ -1,0 +1,14 @@
+meta {
+  name: 01 Status
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/uetds/status/
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

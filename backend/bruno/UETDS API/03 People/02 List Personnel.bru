@@ -1,0 +1,14 @@
+meta {
+  name: 02 List Personnel
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/personnel/?search=11111111111
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

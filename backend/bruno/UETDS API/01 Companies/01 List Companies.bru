@@ -1,0 +1,19 @@
+meta {
+  name: 01 List Companies
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/companies/
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+script:post-response {
+  if (res.status === 200 && res.body.results && res.body.results.length > 0) {
+    bru.setEnvVar("companyId", res.body.results[0].id);
+  }
+}

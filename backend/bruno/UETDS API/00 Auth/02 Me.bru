@@ -1,0 +1,19 @@
+meta {
+  name: 02 Me
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/me
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}
+
+tests {
+  test("me succeeds", function() {
+    expect(res.status).to.equal(200);
+  });
+}

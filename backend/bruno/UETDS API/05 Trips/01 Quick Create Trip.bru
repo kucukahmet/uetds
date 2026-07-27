@@ -1,0 +1,60 @@
+meta {
+  name: 01 Quick Create Trip
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/trips/quick-create/
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}
+
+body:json {
+  {
+    "departure_at": "2026-06-13T10:30:00+03:00",
+    "vehicle": {
+      "plate": "34BRN001",
+      "seat_capacity": 16
+    },
+    "driver": {
+      "identity_no": "11111111111",
+      "first_name": "Ahmet",
+      "last_name": "Yilmaz",
+      "phone": "+905551111111"
+    },
+    "route": {
+      "from": {
+        "city": "Istanbul",
+        "district": "Bakirkoy",
+        "address": "Istanbul Havalimani"
+      },
+      "to": {
+        "city": "Istanbul",
+        "district": "Besiktas",
+        "address": "Otel"
+      }
+    },
+    "passengers": [
+      {
+        "first_name": "Ayse",
+        "last_name": "Demir",
+        "identity_type": "tc",
+        "identity_no": "22222222222",
+        "nationality": "TR",
+        "phone": "+905552222222"
+      }
+    ],
+    "submit_to_uetds": false
+  }
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setEnvVar("tripId", res.body.trip_id);
+  }
+}

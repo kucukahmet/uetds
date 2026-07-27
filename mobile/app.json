@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "UETDS Mobile",
+    "slug": "ahmet",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "uetds",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.uetds.mobile",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.uetds.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#1A237E"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Yolcu listesini fotoğraftan içe aktarmak için fotoğraf erişimi gerekli.",
+          "cameraPermission": "Yolcu listesini fotoğraftan içe aktarmak için kamera erişimi gerekli."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "defaultBackend": "server-test",
+      "router": {},
+      "eas": {
+        "projectId": "45a35b04-e901-4ce4-ae08-41256190beb0"
+      }
+    },
+    "owner": "ahmetkucuks-team"
+  }
+}

@@ -1,0 +1,14 @@
+meta {
+  name: 02 List Passengers
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/passengers/?search=Ayse
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

@@ -1,0 +1,14 @@
+meta {
+  name: 04 IP List
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/uetds/ip-list/?environment=test
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

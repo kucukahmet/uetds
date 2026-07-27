@@ -1,0 +1,51 @@
+{
+  "name": "uetds-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo/vector-icons": "latest",
+    "@hookform/resolvers": "latest",
+    "@tanstack/react-query": "latest",
+    "axios": "latest",
+    "expo": "~56.0.16",
+    "expo-constants": "~56.0.21",
+    "expo-document-picker": "~56.0.4",
+    "expo-file-system": "~56.0.8",
+    "expo-font": "~56.0.7",
+    "expo-image-picker": "~56.0.21",
+    "expo-linking": "~56.0.15",
+    "expo-router": "~56.2.15",
+    "expo-secure-store": "latest",
+    "expo-sharing": "~56.0.22",
+    "expo-status-bar": "latest",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-hook-form": "latest",
+    "react-native": "latest",
+    "react-native-gesture-handler": "~2.31.1",
+    "react-native-reanimated": "4.3.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "latest",
+    "react-native-web": "latest",
+    "react-native-worklets": "0.8.3",
+    "xlsx": "^0.18.5",
+    "zod": "latest",
+    "zustand": "latest"
+  },
+  "devDependencies": {
+    "@testing-library/react-native": "latest",
+    "@types/react": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
+  }
+}

@@ -1,0 +1,13 @@
+meta {
+  name: 03 Switch Company
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/companies/{{companyId}}/switch/
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+}

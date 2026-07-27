@@ -1,0 +1,14 @@
+meta {
+  name: 03 UETDS Check Personnel
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/personnel/{{personnelId}}/uetds-check/
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

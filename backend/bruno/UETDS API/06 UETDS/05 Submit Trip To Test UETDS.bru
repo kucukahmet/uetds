@@ -1,0 +1,23 @@
+meta {
+  name: 05 Submit Trip To Test UETDS
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/submit-uetds/
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}
+
+body:json {
+  {
+    "environment": "test",
+    "idempotency_key": "{{idempotencyKey}}",
+    "confirm_live_submission": false
+  }
+}

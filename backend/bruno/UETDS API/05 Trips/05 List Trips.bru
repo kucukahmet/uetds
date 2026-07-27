@@ -1,0 +1,14 @@
+meta {
+  name: 05 List Trips
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/trips/?status=ready
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}

@@ -1,0 +1,28 @@
+meta {
+  name: 04 Create Return Trip
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/trips/{{tripId}}/create-return-trip/
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}
+
+body:json {
+  {
+    "departure_at": "2026-06-13T18:30:00+03:00",
+    "route_note": "Bruno return trip"
+  }
+}
+
+script:post-response {
+  if (res.status === 200) {
+    bru.setEnvVar("returnTripId", res.body.id);
+  }
+}

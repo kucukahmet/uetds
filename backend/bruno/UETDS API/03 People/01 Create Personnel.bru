@@ -1,0 +1,32 @@
+meta {
+  name: 01 Create Personnel
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/personnel/
+  body: json
+}
+
+headers {
+  Authorization: Bearer {{accessToken}}
+  X-Company-ID: {{companyId}}
+}
+
+body:json {
+  {
+    "type": "driver",
+    "first_name": "Ahmet",
+    "last_name": "Yilmaz",
+    "identity_no": "11111111111",
+    "phone": "+905551111111",
+    "status": "active"
+  }
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("personnelId", res.body.id);
+  }
+}
