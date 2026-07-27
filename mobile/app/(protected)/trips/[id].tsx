@@ -173,6 +173,14 @@ export default function TripDetailScreen() {
         <AppText color={colors.textMuted}>{trip.arrival_address}</AppText>
         {trip.arrival_estimated_at ? <AppText color={colors.textMuted}>Bitiş: {formatDateTime(trip.arrival_estimated_at)}</AppText> : null}
         {trip.firm_trip_no ? <AppText color={colors.textMuted}>Firma sefer no: {trip.firm_trip_no}</AppText> : null}
+        <View style={styles.systemIdBlock}>
+          <AppText variant="labelMd" color={colors.textSubtle}>
+            Sistem ID
+          </AppText>
+          <AppText selectable variant="labelMd" color={colors.textMuted} style={styles.systemIdValue}>
+            {trip.id}
+          </AppText>
+        </View>
       </Card>
       <Card style={syncCardStyle(trip.uetds_sync_status)}>
         <View style={styles.syncHeader}>
@@ -316,6 +324,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     gap: spacing.sm
+  },
+  systemIdBlock: {
+    gap: 2
+  },
+  systemIdValue: {
+    flexShrink: 1
   },
   modalBackdrop: {
     alignItems: "center",
