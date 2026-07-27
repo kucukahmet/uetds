@@ -15,7 +15,7 @@ from passengers.models import Passenger
 from people.models import Personnel
 from common.permissions import role_has_permission
 from trips.models import SavedLocation, SavedRoute, Trip, TripGroup, TripPassenger, TripPersonnel
-from trips.reports import format_passenger_name
+from trips.reports import format_passenger_name, format_price
 from uetds.client import UETDSResponse, UetdsAriziClient
 from uetds.models import UETDSCredential, UETDSOperationLog
 
@@ -1121,7 +1121,11 @@ def test_trip_detail_pdf_endpoint_returns_pdf_bytes():
 def test_trip_detail_pdf_masks_passenger_last_name():
     passenger = type("PassengerLike", (), {"first_name": "GERRAD", "last_name": "FERGUSON"})()
 
-    assert format_passenger_name(passenger) == "GERRAD F******"
+    assert format_passenger_name(passenger) == "GERRAD F*******"
+
+
+def test_trip_detail_pdf_keeps_price_decimals():
+    assert format_price(900) == "900.00"
 
 
 def test_trip_can_be_edited_before_uetds_submission():
