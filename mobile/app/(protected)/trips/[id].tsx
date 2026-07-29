@@ -22,6 +22,9 @@ import type { SubmitUetdsResponse } from "@/types/api";
 
 type ConfirmAction = "delete" | "cancel-uetds";
 
+const UETDS_CANCEL_PROPAGATION_MESSAGE =
+  "İptal isteği başarıyla alınsa bile e-Devlet/Bakanlık paneline yansıması yaklaşık 30 dakikayı bulabilir. Bu sürede panelde geçerli görünmesi normaldir.";
+
 export default function TripDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
@@ -80,9 +83,15 @@ export default function TripDetailScreen() {
         queryClient.invalidateQueries({ queryKey: queryKeys.tripsRoot() })
       ]);
       if (result.success) {
-        Alert.alert("Sefer iptal edildi", result.sonuc_mesaji || "UETDS seferi iptal edildi. Kayıt sistemde iptal olarak kalacak.");
+        Alert.alert(
+          "Sefer iptal edildi",
+          [result.sonuc_mesaji || "UETDS seferi iptal edildi. Kayıt sistemde iptal olarak kalacak.", UETDS_CANCEL_PROPAGATION_MESSAGE].join("\n\n")
+        );
       } else if (result.summary_remote_status === "submitted") {
-        Alert.alert("İptal doğrulanmadı", result.sonuc_mesaji || "Bakanlık özeti seferi hâlâ geçerli gösteriyor.");
+        Alert.alert(
+          "İptal doğrulanmadı",
+          [result.sonuc_mesaji || "Bakanlık özeti seferi hâlâ geçerli gösteriyor.", UETDS_CANCEL_PROPAGATION_MESSAGE].join("\n\n")
+        );
       } else {
         Alert.alert("İptal başarısız", result.sonuc_mesaji || "UETDS sefer iptali tamamlanamadı.");
       }
@@ -151,7 +160,7 @@ export default function TripDetailScreen() {
       : confirmAction === "cancel-uetds"
         ? {
             title: "UETDS seferi iptal edilsin mi?",
-            message: "Bu işlem UETDS'ye iptal isteği gönderir. Başarılı olursa sefer uygulamada iptal olarak kalır ve silinmez.",
+            message: `Bu işlem UETDS'ye iptal isteği gönderir. Başarılı olursa sefer uygulamada iptal olarak kalır ve silinmez.\n\n${UETDS_CANCEL_PROPAGATION_MESSAGE}`,
             confirmLabel: "UETDS'de İptal Et",
             confirmIcon: "close-circle" as const,
             loading: cancelUetds.isPending,
@@ -219,6 +228,14 @@ export default function TripDetailScreen() {
           />
         ) : null}
       </Card>
+      {trip.status === "cancelled" ? (
+        <Card style={styles.cancelInfoCard}>
+          <AppText variant="titleLg" color="#6E2F2A">
+            Panel Güncellemesi Beklenebilir
+          </AppText>
+          <AppText color="#6E2F2A">{UETDS_CANCEL_PROPAGATION_MESSAGE}</AppText>
+        </Card>
+      ) : null}
       {trip.uetds_last_error ? (
         <Card style={styles.failedCard}>
           <View style={styles.syncHeader}>
@@ -343,6 +360,10 @@ const styles = StyleSheet.create({
   pendingCard: {
     backgroundColor: colors.surfaceMuted,
     borderColor: colors.divider
+  },
+  cancelInfoCard: {
+    backgroundColor: "#FFF8F7",
+    borderColor: "#E7B4AF"
   },
   syncHeader: {
     alignItems: "center",
