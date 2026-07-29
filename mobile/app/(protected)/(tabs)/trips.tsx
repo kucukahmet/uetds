@@ -53,8 +53,10 @@ export default function TripsScreen() {
       </View>
       <Pressable style={[styles.switchRow, showExpiredUnsent && styles.switchRowActive]} onPress={() => setShowExpiredUnsent((value) => !value)}>
         <View style={styles.switchText}>
-          <AppText variant="labelLg">Tarihi geçmiş gönderilmemişler</AppText>
-          <AppText color={colors.textMuted}>Açınca yalnızca zamanı geçmiş ve UETDS'ye gitmemiş seferler görünür.</AppText>
+          <AppText variant="labelMd">Geçmiş gönderilmemişler</AppText>
+          <AppText variant="labelMd" color={colors.textSubtle}>
+            Zamanı geçmiş ve UETDS'ye gitmemiş seferleri göster.
+          </AppText>
         </View>
         <Switch
           value={showExpiredUnsent}
@@ -65,32 +67,52 @@ export default function TripsScreen() {
       </Pressable>
       {trips.isLoading ? <LoadingState /> : null}
       {!trips.isLoading && trips.data?.results.length === 0 ? <EmptyState title={emptyTitle} /> : null}
-      {trips.data?.results.map((trip) => (
-        <Card key={trip.id}>
-          <View style={styles.row}>
-            <View style={styles.tripBody}>
-              <AppText variant="titleLg">{trip.vehicle_detail?.plate || "Plaka yok"}</AppText>
-              <AppText color={colors.textMuted}>{`${trip.departure_city} -> ${trip.arrival_city}`}</AppText>
-              <AppText variant="labelMd" color={colors.textSubtle}>
-                {formatDateTime(trip.departure_at)} - {trip.passenger_count} yolcu
-              </AppText>
-              {trip.uetds_has_unsent_changes ? (
-                <AppText variant="labelMd" color="#604100">
-                  UETDS güncellemesi bekliyor
+      {trips.data?.results.map((trip) => {
+        const expiredUnsent = isExpiredUnsentTrip(trip);
+        return (
+          <Card key={trip.id} style={expiredUnsent ? styles.expiredCard : null}>
+            <View style={styles.row}>
+              <View style={styles.tripBody}>
+                <AppText variant="titleLg">{trip.vehicle_detail?.plate || "Plaka yok"}</AppText>
+                <AppText color={colors.textMuted}>{`${trip.departure_city} -> ${trip.arrival_city}`}</AppText>
+                <AppText variant="labelMd" color={colors.textSubtle}>
+                  {formatDateTime(trip.departure_at)} - {trip.passenger_count} yolcu
                 </AppText>
-              ) : null}
-              {trip.uetds_last_error ? (
-                <AppText variant="labelMd" color={colors.error}>
-                  {trip.uetds_last_error.operation_label}: {trip.uetds_last_error.message}
-                </AppText>
-              ) : null}
+                {trip.uetds_has_unsent_changes ? (
+                  <AppText variant="labelMd" color="#604100">
+                    UETDS güncellemesi bekliyor
+                  </AppText>
+                ) : null}
+                {trip.uetds_last_error ? (
+                  <AppText variant="labelMd" color={colors.error}>
+                    {trip.uetds_last_error.operation_label}: {trip.uetds_last_error.message}
+                  </AppText>
+                ) : null}
+              </View>
+              <View style={styles.badgeColumn}>
+                {expiredUnsent ? (
+                  <View style={styles.expiredChip}>
+                    <AppText variant="labelMd" color="#8C1D18">
+                      Tarihi Geçti
+                    </AppText>
+                  </View>
+                ) : null}
+                <Badge status={trip.status} />
+              </View>
             </View>
-            <Badge status={trip.status} />
-          </View>
-          <Button label="Detay" icon="open" variant="ghost" onPress={() => router.push(`/trips/${trip.id}`)} />
-        </Card>
-      ))}
+            <Button label="Detay" icon="open" variant="ghost" onPress={() => router.push(`/trips/${trip.id}`)} />
+          </Card>
+        );
+      })}
     </Screen>
+  );
+}
+
+function isExpiredUnsentTrip(trip: { departure_at: string; status: string; uetds_reference_no?: string | null }) {
+  return (
+    new Date(trip.departure_at).getTime() < Date.now() &&
+    ["draft", "ready", "failed"].includes(trip.status) &&
+    !trip.uetds_reference_no
   );
 }
 
@@ -127,11 +149,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
     justifyContent: "space-between",
-    padding: spacing.sm
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
   },
   switchRowActive: {
-    backgroundColor: colors.warningSoft,
-    borderColor: colors.warning
+    backgroundColor: "#FFF8F7",
+    borderColor: "#E7B4AF"
   },
   switchText: {
     flex: 1,
@@ -141,6 +164,21 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     flexDirection: "row",
     gap: spacing.sm
+  },
+  badgeColumn: {
+    alignItems: "flex-end",
+    gap: spacing.xs
+  },
+  expiredCard: {
+    backgroundColor: "#FFF8F7",
+    borderColor: "#E7B4AF"
+  },
+  expiredChip: {
+    alignSelf: "flex-end",
+    backgroundColor: "#FCEAE7",
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5
   },
   tripBody: {
     flex: 1,
