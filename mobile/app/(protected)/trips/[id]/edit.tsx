@@ -24,9 +24,11 @@ import { goBackOrReplace } from "@/lib/navigation";
 import { genderOptions, identityOptions } from "@/lib/options";
 import { sanitizePassengerIdentity } from "@/lib/passengerValidation";
 import { colors, radius, spacing } from "@/theme/tokens";
-import type { LocationReference, Passenger, Trip, TripUpdatePayload } from "@/types/api";
+import type { LocationReference, Passenger, Personnel, Trip, TripUpdatePayload, Vehicle } from "@/types/api";
 
 type IdentityType = Passenger["identity_type"];
+
+const editSteps = ["Sefer", "Araç", "Rota", "Yolcu", "Kontrol"];
 
 type PassengerEditDraft = {
   id: string;
@@ -78,6 +80,7 @@ export default function TripEditScreen() {
   const vehicles = useQuery({ queryKey: queryKeys.vehicles("?status=active"), queryFn: () => endpoints.vehicles("?status=active") });
   const drivers = useQuery({ queryKey: queryKeys.personnel("?type=driver&status=active"), queryFn: () => endpoints.personnel("?type=driver&status=active") });
   const [draft, setDraft] = useState<EditDraft | null>(null);
+  const [stepIndex, setStepIndex] = useState(0);
 
   useEffect(() => {
     if (tripQuery.data && !draft) {
@@ -129,10 +132,14 @@ export default function TripEditScreen() {
       }
       return { ...current, passengers: current.passengers.filter((passenger) => passenger.id !== passengerId) };
     });
-  const handleSave = () => {
-    const validationError = firstDraftError(draft);
+  const next = () => {
+    const validationError = firstStepError(draft, stepIndex);
     if (validationError) {
       Alert.alert("Eksik veya hatalı bilgi", validationError);
+      return;
+    }
+    if (stepIndex < editSteps.length - 1) {
+      setStepIndex((value) => value + 1);
       return;
     }
     save.mutate(payloadFromDraft(draft));
@@ -158,30 +165,102 @@ export default function TripEditScreen() {
       footer={
         <StickyActionBar>
           <View style={styles.footerRow}>
-            <Button label="Vazgeç" icon="close" variant="ghost" onPress={() => goBackOrReplace(`/trips/${id}`)} style={styles.footerButton} />
-            <Button label="Kaydet" icon="save" loading={save.isPending} onPress={handleSave} style={styles.footerButton} />
+            <Button
+              label={stepIndex === 0 ? "Vazgeç" : "Geri"}
+              icon={stepIndex === 0 ? "close" : "chevron-back"}
+              variant="ghost"
+              onPress={() => (stepIndex === 0 ? goBackOrReplace(`/trips/${id}`) : setStepIndex((value) => value - 1))}
+              style={styles.footerButton}
+            />
+            <Button
+              label={stepIndex === editSteps.length - 1 ? "Kaydet" : "Devam"}
+              icon={stepIndex === editSteps.length - 1 ? "save" : "chevron-forward"}
+              loading={save.isPending}
+              onPress={next}
+              style={styles.footerButton}
+            />
           </View>
         </StickyActionBar>
       }
     >
       <PageHeader
         title="Sefer Düzenle"
-        subtitle={hasUetdsSubmission ? "Kaydedilen değişiklikler UETDS güncellemesi bekler" : "UETDS gönderimine kadar değiştirilebilir"}
+        subtitle={editSteps[stepIndex]}
         right={<Badge status={trip.status} />}
         fallbackHref={`/trips/${id}`}
       />
+      {hasUetdsSubmission ? (
+        <View style={styles.notice}>
+          <AppText color={colors.text}>Kaydedilen değişiklikler UETDS'ye tekrar gönderilene kadar bekler.</AppText>
+        </View>
+      ) : null}
+      <StepIndicator current={stepIndex} />
 
-      <Card>
-        <AppText variant="titleLg">Sefer</AppText>
-        <DateTimeControl label="Hareket" value={draft.departure_at} onChange={(departure_at) => patchDraft({ departure_at })} />
-        <DateTimeControl label="Bitiş" value={draft.arrival_estimated_at} onChange={(arrival_estimated_at) => patchDraft({ arrival_estimated_at })} />
-        <TextField label="Açıklama" value={draft.description} onChangeText={(description) => patchDraft({ description })} multiline />
-      </Card>
+      {stepIndex === 0 ? (
+        <TripStep draft={draft} patchDraft={patchDraft} />
+      ) : stepIndex === 1 ? (
+        <VehicleDriverStep
+          draft={draft}
+          vehicles={vehicles.data?.results ?? []}
+          drivers={drivers.data?.results ?? []}
+          isLoading={vehicles.isLoading || drivers.isLoading}
+          patchDraft={patchDraft}
+        />
+      ) : stepIndex === 2 ? (
+        <RouteGroupStep draft={draft} patchDraft={patchDraft} />
+      ) : stepIndex === 3 ? (
+        <PassengersStep draft={draft} addPassenger={addPassenger} updatePassenger={updatePassenger} removePassenger={removePassenger} />
+      ) : (
+        <ReviewStep draft={draft} vehicles={vehicles.data?.results ?? []} drivers={drivers.data?.results ?? []} errors={allDraftErrors(draft)} />
+      )}
+    </Screen>
+  );
+}
 
+function StepIndicator({ current }: { current: number }) {
+  return (
+    <View style={styles.stepRow}>
+      {editSteps.map((step, index) => (
+        <View key={step} style={[styles.stepPill, current === index && styles.stepPillActive]}>
+          <AppText variant="labelMd" color={current === index ? colors.surface : colors.textMuted}>
+            {`${index + 1}. ${step}`}
+          </AppText>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function TripStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (patch: Partial<EditDraft>) => void }) {
+  return (
+    <Card>
+      <AppText variant="titleLg">Sefer</AppText>
+      <DateTimeControl label="Hareket" value={draft.departure_at} onChange={(departure_at) => patchDraft({ departure_at })} />
+      <DateTimeControl label="Bitiş" value={draft.arrival_estimated_at} onChange={(arrival_estimated_at) => patchDraft({ arrival_estimated_at })} />
+      <TextField label="Açıklama" value={draft.description} onChangeText={(description) => patchDraft({ description })} multiline />
+    </Card>
+  );
+}
+
+function VehicleDriverStep({
+  draft,
+  vehicles,
+  drivers,
+  isLoading,
+  patchDraft
+}: {
+  draft: EditDraft;
+  vehicles: Vehicle[];
+  drivers: Personnel[];
+  isLoading: boolean;
+  patchDraft: (patch: Partial<EditDraft>) => void;
+}) {
+  return (
+    <>
       <Card>
         <AppText variant="titleLg">Araç</AppText>
-        {vehicles.isLoading ? <AppText color={colors.textMuted}>Araçlar yükleniyor</AppText> : null}
-        {vehicles.data?.results.map((vehicle) => (
+        {isLoading ? <AppText color={colors.textMuted}>Kayıtlar yükleniyor</AppText> : null}
+        {vehicles.map((vehicle) => (
           <SelectionRow
             key={vehicle.id}
             title={vehicle.plate}
@@ -201,8 +280,7 @@ export default function TripEditScreen() {
             </AppText>
           </View>
         </View>
-        {drivers.isLoading ? <AppText color={colors.textMuted}>Şoförler yükleniyor</AppText> : null}
-        {drivers.data?.results.map((driver) => (
+        {drivers.map((driver) => (
           <SelectionRow
             key={driver.id}
             title={`${driver.first_name} ${driver.last_name}`}
@@ -212,7 +290,13 @@ export default function TripEditScreen() {
           />
         ))}
       </Card>
+    </>
+  );
+}
 
+function RouteGroupStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (patch: Partial<EditDraft>) => void }) {
+  return (
+    <>
       <Card>
         <AppText variant="titleLg">Rota</AppText>
         <LocationFields
@@ -247,23 +331,97 @@ export default function TripEditScreen() {
         </View>
         <TextField label="Grup Açıklaması" value={draft.group_description} onChangeText={(group_description) => patchDraft({ group_description, route_note: group_description })} multiline />
       </Card>
+    </>
+  );
+}
 
-      <Card>
-        <View style={styles.sectionHeader}>
+function PassengersStep({
+  draft,
+  addPassenger,
+  updatePassenger,
+  removePassenger
+}: {
+  draft: EditDraft;
+  addPassenger: () => void;
+  updatePassenger: (id: string, patch: Partial<PassengerEditDraft>) => void;
+  removePassenger: (id: string) => void;
+}) {
+  return (
+    <Card>
+      <View style={styles.sectionHeader}>
+        <View>
           <AppText variant="titleLg">Yolcular</AppText>
-          <Button label="Yolcu Ekle" icon="add" variant="ghost" onPress={addPassenger} style={styles.inlineButton} />
+          <AppText variant="labelMd" color={colors.textMuted}>
+            {draft.passengers.length} yolcu
+          </AppText>
         </View>
-        {draft.passengers.map((passenger, index) => (
-          <PassengerEditCard
-            key={passenger.id}
-            passenger={passenger}
-            index={index}
-            updatePassenger={updatePassenger}
-            removePassenger={removePassenger}
-          />
-        ))}
+        <Button label="Yolcu Ekle" icon="add" variant="ghost" onPress={addPassenger} style={styles.inlineButton} />
+      </View>
+      {draft.passengers.map((passenger, index) => (
+        <PassengerEditCard
+          key={passenger.id}
+          passenger={passenger}
+          index={index}
+          updatePassenger={updatePassenger}
+          removePassenger={removePassenger}
+        />
+      ))}
+    </Card>
+  );
+}
+
+function ReviewStep({
+  draft,
+  vehicles,
+  drivers,
+  errors
+}: {
+  draft: EditDraft;
+  vehicles: Vehicle[];
+  drivers: Personnel[];
+  errors: string[];
+}) {
+  const selectedVehicle = vehicles.find((vehicle) => vehicle.id === draft.vehicle);
+  const selectedDrivers = draft.driver_ids
+    .map((driverId) => drivers.find((driver) => driver.id === driverId))
+    .filter((driver): driver is Personnel => Boolean(driver));
+  const driverLabel = selectedDrivers.length
+    ? selectedDrivers.map((driver) => `${driver.first_name} ${driver.last_name}`.trim()).join(", ")
+    : draft.driver_ids.length
+      ? `${draft.driver_ids.length} şoför`
+      : "Şoför seçilmedi";
+
+  return (
+    <>
+      <Card>
+        <AppText variant="titleLg">Kontrol</AppText>
+        <SummaryRow label="Sefer" value={`${formatDateTime(draft.departure_at)} - ${formatDateTime(draft.arrival_estimated_at)}`} />
+        <SummaryRow label="Araç" value={selectedVehicle ? `${selectedVehicle.plate} / ${selectedVehicle.seat_capacity} koltuk` : "Araç seçilmedi"} />
+        <SummaryRow label="Şoförler" value={driverLabel} />
+        <SummaryRow label="Rota" value={`${draft.departure_district || draft.departure_city} -> ${draft.arrival_district || draft.arrival_city}`} />
+        <SummaryRow label="Grup" value={`${draft.group_name || "-"} / ${draft.group_price || "-"} ${draft.group_currency || "TRY"}`} />
+        <SummaryRow label="Yolcu" value={`${draft.passengers.length} kişi`} />
       </Card>
-    </Screen>
+      {errors.length ? (
+        <Card style={styles.errorCard}>
+          <AppText variant="titleLg" color={colors.error}>
+            Eksik Bilgiler
+          </AppText>
+          {errors.map((error) => (
+            <AppText key={error} color={colors.error}>
+              {error}
+            </AppText>
+          ))}
+        </Card>
+      ) : (
+        <Card style={styles.readyCard}>
+          <AppText variant="titleLg" color={colors.secondary}>
+            Kaydetmeye hazır
+          </AppText>
+          <AppText color={colors.textMuted}>Kaydet dediğinde değişiklikler sefer kaydına işlenecek.</AppText>
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -444,6 +602,17 @@ function SelectionRow({ title, subtitle, active, onPress }: { title: string; sub
   );
 }
 
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.summaryRow}>
+      <AppText variant="labelLg" color={colors.textMuted}>
+        {label}
+      </AppText>
+      <AppText style={styles.summaryValue}>{value}</AppText>
+    </View>
+  );
+}
+
 function draftFromTrip(trip: Trip): EditDraft {
   const group = trip.groups[0];
   const driverIds = (trip.personnel || []).filter((item) => item.role === "driver").map((item) => item.personnel.id);
@@ -573,36 +742,91 @@ function newPassengerDraft(groupId: string): PassengerEditDraft {
   };
 }
 
-function firstDraftError(draft: EditDraft) {
+function firstStepError(draft: EditDraft, step: number) {
+  return stepDraftErrors(draft, step)[0] || "";
+}
+
+function stepDraftErrors(draft: EditDraft, step: number) {
+  const errors = allDraftErrors(draft);
+  if (step === 0) {
+    return errors.filter((error) => ["Hareket", "Bitiş"].some((prefix) => error.startsWith(prefix)));
+  }
+  if (step === 1) {
+    return errors.filter((error) => ["Araç", "Şoför"].some((prefix) => error.startsWith(prefix)));
+  }
+  if (step === 2) {
+    return errors.filter((error) => ["Biniş", "İniş", "Grup"].some((prefix) => error.startsWith(prefix)));
+  }
+  if (step === 3) {
+    return errors.filter((error) => error.startsWith("Yolcu"));
+  }
+  return errors;
+}
+
+function allDraftErrors(draft: EditDraft) {
+  const errors: string[] = [];
+  if (!draft.departure_at) {
+    errors.push("Hareket zamanı zorunlu.");
+  }
+  if (!draft.arrival_estimated_at) {
+    errors.push("Bitiş zamanı zorunlu.");
+  }
+  if (draft.departure_at && draft.arrival_estimated_at && parseIso(draft.arrival_estimated_at).getTime() <= parseIso(draft.departure_at).getTime()) {
+    errors.push("Bitiş zamanı hareketten sonra olmalı.");
+  }
+  if (!draft.vehicle) {
+    errors.push("Araç seçilmeli.");
+  }
   if (!draft.driver_ids.length) {
-    return "En az bir şoför seçilmeli.";
+    errors.push("Şoför seçilmeli.");
+  }
+  if (!draft.departure_city || !draft.departure_district || !draft.departure_city_code || !draft.departure_district_code) {
+    errors.push("Biniş yeri seçilmeli.");
+  }
+  if (!draft.departure_address.trim() && !draft.departure_place.trim()) {
+    errors.push("Biniş adres detayı zorunlu.");
+  }
+  if (!draft.arrival_city || !draft.arrival_district || !draft.arrival_city_code || !draft.arrival_district_code) {
+    errors.push("İniş yeri seçilmeli.");
+  }
+  if (!draft.arrival_address.trim() && !draft.arrival_place.trim()) {
+    errors.push("İniş adres detayı zorunlu.");
+  }
+  if (!draft.group_name.trim()) {
+    errors.push("Grup adı zorunlu.");
+  }
+  if (!draft.group_price.trim()) {
+    errors.push("Grup ücreti zorunlu.");
+  }
+  if (!draft.group_description.trim()) {
+    errors.push("Grup açıklaması zorunlu.");
   }
   if (!draft.passengers.length) {
-    return "En az bir yolcu eklenmeli.";
+    errors.push("Yolcu eklenmeli.");
   }
   for (let index = 0; index < draft.passengers.length; index += 1) {
     const passenger = draft.passengers[index];
     const prefix = `Yolcu ${index + 1}`;
     if (!passenger.first_name.trim() || !passenger.last_name.trim()) {
-      return `${prefix}: ad soyad zorunlu.`;
+      errors.push(`${prefix}: ad soyad zorunlu.`);
     }
     if (!["tc", "passport"].includes(passenger.identity_type)) {
-      return `${prefix}: kimlik tipi seçilmeli.`;
+      errors.push(`${prefix}: kimlik tipi seçilmeli.`);
     }
     if (!passenger.identity_no) {
-      return `${prefix}: kimlik/pasaport zorunlu.`;
+      errors.push(`${prefix}: kimlik/pasaport zorunlu.`);
     }
     if (passenger.identity_type === "tc" && !isValidTurkishIdentityNo(passenger.identity_no)) {
-      return `${prefix}: T.C. Kimlik numarası geçersiz.`;
+      errors.push(`${prefix}: T.C. Kimlik numarası geçersiz.`);
     }
     if (passenger.identity_type === "passport" && !resolveCountry(passenger.nationality, passenger.country_name)) {
-      return `${prefix}: ülke seçilmeli.`;
+      errors.push(`${prefix}: ülke seçilmeli.`);
     }
     if (!normalizeGenderCode(passenger.gender)) {
-      return `${prefix}: cinsiyet seçilmeli.`;
+      errors.push(`${prefix}: cinsiyet seçilmeli.`);
     }
   }
-  return "";
+  return errors;
 }
 
 function isUetdsLocked(trip: Trip) {
@@ -631,6 +855,11 @@ function formatDate(date: Date) {
 
 function formatTime(date: Date) {
   return new Intl.DateTimeFormat("tr-TR", { hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function formatDateTime(value: string) {
+  const date = parseIso(value);
+  return `${formatDate(date)} ${formatTime(date)}`;
 }
 
 function normalizeClockInput(value: string) {
@@ -662,6 +891,24 @@ const styles = StyleSheet.create({
   footerButton: {
     flex: 1
   },
+  stepRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs
+  },
+  stepPill: {
+    backgroundColor: colors.surface,
+    borderColor: colors.divider,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    minHeight: 32,
+    paddingHorizontal: spacing.sm,
+    justifyContent: "center"
+  },
+  stepPillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
   columns: {
     flexDirection: "row",
     gap: spacing.sm
@@ -674,6 +921,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing.sm,
     justifyContent: "space-between"
+  },
+  notice: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warning,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.sm
   },
   inlineButton: {
     minHeight: 40,
@@ -742,6 +996,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flex: 1,
     gap: 2
+  },
+  summaryRow: {
+    borderBottomColor: colors.divider,
+    borderBottomWidth: 1,
+    gap: 2,
+    paddingVertical: spacing.xs
+  },
+  summaryValue: {
+    flexShrink: 1
+  },
+  readyCard: {
+    backgroundColor: colors.secondarySoft,
+    borderColor: colors.secondary
+  },
+  errorCard: {
+    backgroundColor: colors.errorSoft,
+    borderColor: colors.error
   },
   lockedCard: {
     backgroundColor: colors.errorSoft,
