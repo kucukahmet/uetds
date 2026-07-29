@@ -814,6 +814,56 @@ def test_trip_list_is_tenant_scoped():
     assert response.data["results"][0]["vehicle_detail"]["plate"] == "34AAA001"
 
 
+def test_trip_list_upcoming_scope_hides_past_trips():
+    user = make_user()
+    company = make_company("Zaman Firma")
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    past_trip = _trip(company, user, vehicle, driver)
+    future_trip = _trip(company, user, vehicle, driver)
+    past_trip.departure_at = timezone.now() - timedelta(days=1)
+    past_trip.save(update_fields=["departure_at", "updated_at"])
+    future_trip.departure_at = timezone.now() + timedelta(days=1)
+    future_trip.save(update_fields=["departure_at", "updated_at"])
+
+    response = auth_client(user, company).get("/api/v1/trips/?time_scope=upcoming")
+
+    assert response.status_code == 200
+    trip_ids = [item["id"] for item in response.data["results"]]
+    assert str(future_trip.id) in trip_ids
+    assert str(past_trip.id) not in trip_ids
+
+
+def test_trip_list_expired_unsent_scope_only_shows_past_unsent_trips():
+    user = make_user()
+    company = make_company("Geciken Firma")
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    past_unsent = _trip(company, user, vehicle, driver)
+    future_unsent = _trip(company, user, vehicle, driver)
+    past_submitted = _trip(company, user, vehicle, driver)
+    past_cancelled = _trip(company, user, vehicle, driver)
+    past_unsent.departure_at = timezone.now() - timedelta(days=1)
+    future_unsent.departure_at = timezone.now() + timedelta(days=1)
+    past_submitted.departure_at = timezone.now() - timedelta(days=2)
+    past_submitted.status = Trip.Status.SUBMITTED
+    past_submitted.uetds_reference_no = "2607290000000001"
+    past_cancelled.departure_at = timezone.now() - timedelta(days=3)
+    past_cancelled.status = Trip.Status.CANCELLED
+    past_cancelled.uetds_reference_no = "2607290000000002"
+    Trip.objects.bulk_update(
+        [past_unsent, future_unsent, past_submitted, past_cancelled],
+        ["departure_at", "status", "uetds_reference_no", "updated_at"],
+    )
+
+    response = auth_client(user, company).get("/api/v1/trips/?time_scope=expired_unsent")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.data["results"]] == [str(past_unsent.id)]
+
+
 def test_cross_company_header_is_forbidden():
     user = make_user()
     company_a = make_company("Firma A")

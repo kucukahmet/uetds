@@ -1,6 +1,7 @@
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.decorators import action
@@ -116,6 +117,18 @@ class TripViewSet(TenantModelViewSet):
     filterset_fields = ["status", "vehicle__plate", "driver__identity_no"]
     ordering_fields = ["departure_at", "created_at", "status"]
     required_permission = "trip:update"
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        time_scope = self.request.query_params.get("time_scope")
+        if time_scope == "upcoming":
+            return queryset.filter(departure_at__gte=timezone.now())
+        if time_scope in {"expired_unsent", "past_unsent"}:
+            return queryset.filter(
+                departure_at__lt=timezone.now(),
+                status__in=[Trip.Status.DRAFT, Trip.Status.READY, Trip.Status.FAILED],
+            ).filter(Q(uetds_reference_no__isnull=True) | Q(uetds_reference_no=""))
+        return queryset
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())

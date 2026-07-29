@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, Switch, View } from "react-native";
 
 import { endpoints } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
@@ -15,8 +15,8 @@ import { formatDateTime } from "@/lib/format";
 import { colors, radius, spacing } from "@/theme/tokens";
 
 const filters = [
-  { label: "Tümü", query: "" },
-  { label: "Gönderilmedi", query: "?status=ready" },
+  { label: "Tümü", query: "?time_scope=upcoming" },
+  { label: "Gönderilmedi", query: "?status=ready&time_scope=upcoming" },
   { label: "Gönderildi", query: "?status=submitted" },
   { label: "Hatalı", query: "?status=failed" },
   { label: "İptal", query: "?status=cancelled" }
@@ -24,7 +24,10 @@ const filters = [
 
 export default function TripsScreen() {
   const [filter, setFilter] = useState(filters[0]);
-  const trips = useQuery({ queryKey: queryKeys.trips(filter.query), queryFn: () => endpoints.trips(filter.query) });
+  const [showExpiredUnsent, setShowExpiredUnsent] = useState(false);
+  const activeQuery = showExpiredUnsent ? "?time_scope=expired_unsent" : filter.query;
+  const trips = useQuery({ queryKey: queryKeys.trips(activeQuery), queryFn: () => endpoints.trips(activeQuery) });
+  const emptyTitle = showExpiredUnsent ? "Tarihi geçmiş gönderilmemiş sefer yok" : "Sefer bulunamadı";
 
   return (
     <Screen refreshing={trips.isFetching} onRefresh={() => void trips.refetch()}>
@@ -34,15 +37,34 @@ export default function TripsScreen() {
       </View>
       <View style={styles.filters}>
         {filters.map((item) => (
-          <Pressable key={item.label} onPress={() => setFilter(item)} style={[styles.filter, filter.label === item.label && styles.activeFilter]}>
-            <AppText variant="labelMd" color={filter.label === item.label ? colors.surface : colors.primary}>
+          <Pressable
+            key={item.label}
+            onPress={() => {
+              setShowExpiredUnsent(false);
+              setFilter(item);
+            }}
+            style={[styles.filter, !showExpiredUnsent && filter.label === item.label && styles.activeFilter]}
+          >
+            <AppText variant="labelMd" color={!showExpiredUnsent && filter.label === item.label ? colors.surface : colors.primary}>
               {item.label}
             </AppText>
           </Pressable>
         ))}
       </View>
+      <Pressable style={[styles.switchRow, showExpiredUnsent && styles.switchRowActive]} onPress={() => setShowExpiredUnsent((value) => !value)}>
+        <View style={styles.switchText}>
+          <AppText variant="labelLg">Tarihi geçmiş gönderilmemişler</AppText>
+          <AppText color={colors.textMuted}>Açınca yalnızca zamanı geçmiş ve UETDS'ye gitmemiş seferler görünür.</AppText>
+        </View>
+        <Switch
+          value={showExpiredUnsent}
+          onValueChange={setShowExpiredUnsent}
+          trackColor={{ false: colors.surfaceStrong, true: colors.primarySoft }}
+          thumbColor={showExpiredUnsent ? colors.primary : colors.textMuted}
+        />
+      </Pressable>
       {trips.isLoading ? <LoadingState /> : null}
-      {!trips.isLoading && trips.data?.results.length === 0 ? <EmptyState title="Sefer bulunamadı" /> : null}
+      {!trips.isLoading && trips.data?.results.length === 0 ? <EmptyState title={emptyTitle} /> : null}
       {trips.data?.results.map((trip) => (
         <Card key={trip.id}>
           <View style={styles.row}>
@@ -95,6 +117,25 @@ const styles = StyleSheet.create({
   },
   activeFilter: {
     backgroundColor: colors.primary
+  },
+  switchRow: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.divider,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+    padding: spacing.sm
+  },
+  switchRowActive: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warning
+  },
+  switchText: {
+    flex: 1,
+    gap: 2
   },
   row: {
     alignItems: "flex-start",
