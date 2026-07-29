@@ -421,8 +421,12 @@ def cancel_trip(trip, user, reason, environment, confirm_live_submission=False):
 
 
 def validate_trip_identity_numbers(trip):
-    if trip.driver_id and trip.driver.identity_no and not is_valid_turkish_identity_no(trip.driver.identity_no):
-        raise ValidationError({"driver.identity_no": "Şoför T.C. Kimlik numarası geçersiz. Gerçek T.C. ile güncelleyin."})
+    driver_links = list(trip.trip_personnel.select_related("personnel").filter(role="driver"))
+    drivers = [link.personnel for link in driver_links] or ([trip.driver] if trip.driver_id else [])
+    for index, driver in enumerate(drivers, start=1):
+        if driver.identity_no and not is_valid_turkish_identity_no(driver.identity_no):
+            key = "driver.identity_no" if index == 1 else f"drivers.{index}.identity_no"
+            raise ValidationError({key: "Şoför T.C. Kimlik numarası geçersiz. Gerçek T.C. ile güncelleyin."})
     for index, link in enumerate(trip.trip_passengers.select_related("passenger").all(), start=1):
         passenger = link.passenger
         if passenger.identity_type == "tc" and not is_valid_turkish_identity_no(passenger.identity_no):
@@ -454,6 +458,16 @@ def response_indicates_remote_cancelled(response):
     )
 
 
+def _trip_personnel_for_uetds(trip):
+    links = list(trip.trip_personnel.select_related("personnel").all())
+    personnel = [(link.personnel, link.role) for link in links]
+    has_driver_link = any(link.role == "driver" for link in links)
+    if trip.driver_id and not has_driver_link:
+        personnel = [(person, role) for person, role in personnel if person.id != trip.driver_id]
+        personnel.insert(0, (trip.driver, "driver"))
+    return personnel
+
+
 def _run_initial_children_flow(trip, client, environment, operation_results):
     failed = False
     groups = list(_ensure_trip_groups(trip))
@@ -473,8 +487,8 @@ def _run_initial_children_flow(trip, client, environment, operation_results):
             break
 
     if not failed:
-        for link in trip.trip_personnel.select_related("personnel").all():
-            response = client.personel_ekle(trip, link.personnel)
+        for personnel, _role in _trip_personnel_for_uetds(trip):
+            response = client.personel_ekle(trip, personnel)
             log = log_response(trip.company, trip, response, environment)
             set_step(trip.company, trip, "personelEkle", "success" if response.success else "failed", log)
             operation_results.append(_operation_result(response))
@@ -551,8 +565,8 @@ def _sync_updated_personnel(trip, client, environment, old_snapshot, current_sna
         operation_results.append(_operation_result(response))
         if not response.success:
             return True
-    for link in trip.trip_personnel.select_related("personnel").all():
-        response = client.personel_ekle(trip, link.personnel)
+    for personnel, _role in _trip_personnel_for_uetds(trip):
+        response = client.personel_ekle(trip, personnel)
         log = log_response(trip.company, trip, response, environment)
         set_step(trip.company, trip, "personelEkle", "success" if response.success else "failed", log)
         operation_results.append(_operation_result(response))
@@ -649,11 +663,10 @@ def build_trip_submission_snapshot(trip):
             }
         )
     personnel = []
-    for link in trip.trip_personnel.select_related("personnel").all():
-        person = link.personnel
+    for person, role in _trip_personnel_for_uetds(trip):
         personnel.append(
             {
-                "role": link.role,
+                "role": role,
                 "identity_no": person.identity_no,
                 "first_name": person.first_name,
                 "last_name": person.last_name,

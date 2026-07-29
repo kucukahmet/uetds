@@ -263,6 +263,7 @@ class TripSerializer(serializers.ModelSerializer):
 
 
 class TripUpdateSerializer(serializers.ModelSerializer):
+    driver_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=False)
     groups = serializers.ListField(child=serializers.DictField(), required=False)
     passengers = serializers.ListField(child=serializers.DictField(), required=False, allow_empty=False)
 
@@ -272,6 +273,7 @@ class TripUpdateSerializer(serializers.ModelSerializer):
             "description",
             "vehicle",
             "driver",
+            "driver_ids",
             "departure_at",
             "arrival_estimated_at",
             "departure_city",
@@ -304,12 +306,18 @@ class TripUpdateSerializer(serializers.ModelSerializer):
         return driver
 
     def update(self, instance, validated_data):
+        driver_ids = validated_data.pop("driver_ids", None)
         group_payloads = validated_data.pop("groups", None)
         passenger_payloads = validated_data.pop("passengers", None)
+        driver_changed = "driver" in validated_data
+        selected_drivers = self._drivers_from_ids(driver_ids) if driver_ids is not None else None
+        if selected_drivers:
+            validated_data["driver"] = selected_drivers[0]
         for field, value in validated_data.items():
             setattr(instance, field, value)
         instance.save()
-        self._sync_driver_link(instance)
+        if selected_drivers is not None or driver_changed:
+            self._sync_driver_links(instance, selected_drivers)
         if group_payloads is not None:
             self._update_groups(instance, group_payloads)
         if passenger_payloads is not None:
@@ -317,16 +325,50 @@ class TripUpdateSerializer(serializers.ModelSerializer):
         if hasattr(instance, "_prefetched_objects_cache"):
             instance._prefetched_objects_cache.pop("groups", None)
             instance._prefetched_objects_cache.pop("trip_passengers", None)
+            instance._prefetched_objects_cache.pop("trip_personnel", None)
         instance.passenger_count = TripPassenger.objects.filter(company=instance.company, trip=instance).count()
         instance.status = "ready" if QuickCreateTripSerializer(context=self.context).get_missing_fields(instance) == [] else "draft"
         instance.save(update_fields=["passenger_count", "status", "updated_at"])
         return instance
 
+    def _drivers_from_ids(self, driver_ids):
+        if driver_ids is None:
+            return None
+        company = self.context["company"]
+        drivers = []
+        seen = set()
+        for driver_id in driver_ids:
+            if str(driver_id) in seen:
+                continue
+            seen.add(str(driver_id))
+            try:
+                driver = Personnel.objects.get(company=company, id=driver_id, status=Personnel.Status.ACTIVE)
+            except Personnel.DoesNotExist as exc:
+                raise serializers.ValidationError({"driver_ids": "Aktif şoför bulunamadı."}) from exc
+            if driver.type != Personnel.Type.DRIVER:
+                raise serializers.ValidationError({"driver_ids": "Seçilen personel şoför değil."})
+            drivers.append(driver)
+        if not drivers:
+            raise serializers.ValidationError({"driver_ids": "En az bir şoför seçilmeli."})
+        return drivers
+
+    def _sync_driver_links(self, trip, selected_drivers=None):
+        if selected_drivers is None:
+            if not trip.driver_id:
+                return
+            selected_drivers = [trip.driver]
+        selected_driver_ids = [driver.id for driver in selected_drivers]
+        TripPersonnel.objects.filter(company=trip.company, trip=trip, role="driver").exclude(personnel_id__in=selected_driver_ids).delete()
+        for driver in selected_drivers:
+            TripPersonnel.objects.get_or_create(company=trip.company, trip=trip, personnel=driver, role="driver")
+        if selected_drivers and trip.driver_id != selected_drivers[0].id:
+            trip.driver = selected_drivers[0]
+            trip.save(update_fields=["driver", "updated_at"])
+
     def _sync_driver_link(self, trip):
         if not trip.driver_id:
             return
-        TripPersonnel.objects.filter(company=trip.company, trip=trip, role="driver").exclude(personnel=trip.driver).delete()
-        TripPersonnel.objects.get_or_create(company=trip.company, trip=trip, personnel=trip.driver, role="driver")
+        self._sync_driver_links(trip, [trip.driver])
 
     def _update_groups(self, trip, group_payloads):
         existing = list(trip.groups.all())
@@ -438,6 +480,7 @@ class QuickCreateTripSerializer(serializers.Serializer):
     arrival_estimated_at = serializers.DateTimeField(required=False, allow_null=True)
     vehicle_id = serializers.UUIDField(required=False)
     driver_id = serializers.UUIDField(required=False)
+    driver_ids = serializers.ListField(child=serializers.UUIDField(), required=False, allow_empty=False)
     vehicle = serializers.DictField(required=False)
     driver = serializers.DictField(required=False)
     route = serializers.DictField()
@@ -459,7 +502,8 @@ class QuickCreateTripSerializer(serializers.Serializer):
         to_data = route.get("to", {})
         with transaction.atomic():
             vehicle = self._get_vehicle(company, validated_data.get("vehicle") or {}, validated_data.get("vehicle_id"))
-            driver = self._get_driver(company, validated_data.get("driver") or {}, validated_data.get("driver_id"))
+            drivers = self._get_drivers(company, validated_data)
+            driver = drivers[0]
             trip = Trip.objects.create(
                 company=company,
                 created_by=user,
@@ -486,7 +530,8 @@ class QuickCreateTripSerializer(serializers.Serializer):
             groups = [group]
             for group_data in self._group_payloads(validated_data)[1:]:
                 groups.append(self._create_group(company, trip, route, group_data))
-            TripPersonnel.objects.create(company=company, trip=trip, personnel=driver, role="driver")
+            for selected_driver in drivers:
+                TripPersonnel.objects.get_or_create(company=company, trip=trip, personnel=selected_driver, role="driver")
             for personnel_data in validated_data.get("personnel", []):
                 personnel = self._get_personnel(company, personnel_data, default_type=personnel_data.get("type", "assistant"))
                 role = personnel_data.get("role") or personnel.type
@@ -539,6 +584,19 @@ class QuickCreateTripSerializer(serializers.Serializer):
             vehicle.phone = data["phone"]
             vehicle.save(update_fields=["phone", "updated_at"])
         return vehicle
+
+    def _get_drivers(self, company, validated_data):
+        driver_ids = validated_data.get("driver_ids")
+        if driver_ids:
+            drivers = []
+            seen = set()
+            for driver_id in driver_ids:
+                if str(driver_id) in seen:
+                    continue
+                seen.add(str(driver_id))
+                drivers.append(self._get_driver(company, {}, driver_id))
+            return drivers
+        return [self._get_driver(company, validated_data.get("driver") or {}, validated_data.get("driver_id"))]
 
     def _get_driver(self, company, data, driver_id=None):
         if driver_id:
@@ -677,18 +735,25 @@ class QuickCreateTripSerializer(serializers.Serializer):
 
     def get_missing_fields(self, trip):
         missing = []
+        driver_links = list(trip.trip_personnel.select_related("personnel").filter(role="driver"))
+        drivers = [link.personnel for link in driver_links] or ([trip.driver] if trip.driver_id else [])
         checks = [
             ("vehicle.plate", trip.vehicle_id and trip.vehicle.plate),
             ("departure_at", trip.departure_at),
             ("arrival_estimated_at", trip.arrival_estimated_at),
-            ("driver.identity_no", trip.driver_id and trip.driver.identity_no),
-            ("driver.first_name", trip.driver_id and trip.driver.first_name),
-            ("driver.last_name", trip.driver_id and trip.driver.last_name),
-            ("driver.nationality", trip.driver_id and trip.driver.nationality),
-            ("driver.uetds_role_code", trip.driver_id and trip.driver.uetds_role_code is not None),
+            ("drivers", bool(drivers)),
             ("passengers", trip.passenger_count > 0),
         ]
         missing.extend(field for field, value in checks if not value)
+        for index, driver in enumerate(drivers, start=1):
+            driver_checks = [
+                (f"drivers.{index}.identity_no", driver.identity_no),
+                (f"drivers.{index}.first_name", driver.first_name),
+                (f"drivers.{index}.last_name", driver.last_name),
+                (f"drivers.{index}.nationality", driver.nationality),
+                (f"drivers.{index}.uetds_role_code", driver.uetds_role_code is not None),
+            ]
+            missing.extend(field for field, value in driver_checks if not value)
 
         for index, group in enumerate(trip.groups.all(), start=1):
             prefix = f"groups.{index}"

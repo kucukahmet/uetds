@@ -137,6 +137,7 @@ export default function TripDetailScreen() {
   const canDeleteLocal = !trip.uetds_reference_no && ["draft", "ready", "failed"].includes(trip.status);
   const canCancelUetds = Boolean(trip.uetds_reference_no) && !isLocked;
   const submitLabel = submitButtonLabel(trip.status, trip.uetds_sync_status, hasUetdsSubmission);
+  const tripDrivers = (trip.personnel || []).filter((item) => item.role === "driver").map((item) => item.personnel);
   const confirmDialog =
     confirmAction === "delete"
       ? {
@@ -254,9 +255,15 @@ export default function TripDetailScreen() {
       <Card>
         <AppText variant="titleLg">{trip.vehicle_detail?.plate || "Araç"}</AppText>
         <AppText color={colors.textMuted}>{trip.vehicle_detail ? `${trip.vehicle_detail.seat_capacity} koltuk` : "-"}</AppText>
-        <AppText>{trip.driver_detail ? fullName(trip.driver_detail.first_name, trip.driver_detail.last_name) : "Şoför"}</AppText>
-        {trip.driver_detail?.phone ? <AppText color={colors.textMuted}>Şoför tel: {trip.driver_detail.phone}</AppText> : null}
-        {trip.driver_detail?.src_codes ? <AppText color={colors.textMuted}>SRC: {trip.driver_detail.src_codes}</AppText> : null}
+        <AppText variant="labelLg">Şoförler</AppText>
+        {(tripDrivers.length ? tripDrivers : trip.driver_detail ? [trip.driver_detail] : []).map((driver) => (
+          <View key={driver.id} style={styles.driverRow}>
+            <AppText>{fullName(driver.first_name, driver.last_name)}</AppText>
+            <AppText variant="labelMd" color={colors.textMuted}>
+              {[driver.identity_no, driver.phone ? `Tel: ${driver.phone}` : "", driver.src_codes ? `SRC: ${driver.src_codes}` : ""].filter(Boolean).join(" - ")}
+            </AppText>
+          </View>
+        ))}
       </Card>
       {trip.groups.map((group) => (
         <Card key={group.id}>
@@ -388,6 +395,9 @@ const styles = StyleSheet.create({
   },
   modalButton: {
     flex: 1
+  },
+  driverRow: {
+    gap: 2
   },
   passengerRow: {
     gap: 2

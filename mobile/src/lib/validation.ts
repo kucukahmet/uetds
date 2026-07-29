@@ -13,6 +13,7 @@ export const quickTripSchema = z.object({
   description: z.string().optional(),
   vehicle_id: z.string().optional(),
   driver_id: z.string().optional(),
+  driver_ids: z.array(z.string()).optional(),
   vehicle: z.object({
     plate: z.string().min(3),
     seat_capacity: z.number().min(1),

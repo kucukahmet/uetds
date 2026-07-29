@@ -47,7 +47,7 @@ type PassengerEditDraft = {
 type EditDraft = {
   description: string;
   vehicle: string;
-  driver: string;
+  driver_ids: string[];
   departure_at: string;
   arrival_estimated_at: string;
   departure_city: string;
@@ -193,15 +193,22 @@ export default function TripEditScreen() {
       </Card>
 
       <Card>
-        <AppText variant="titleLg">Şoför</AppText>
+        <View style={styles.sectionHeader}>
+          <View>
+            <AppText variant="titleLg">Şoförler</AppText>
+            <AppText variant="labelMd" color={colors.textMuted}>
+              {draft.driver_ids.length ? `${draft.driver_ids.length} şoför seçildi` : "En az bir şoför seçilmeli"}
+            </AppText>
+          </View>
+        </View>
         {drivers.isLoading ? <AppText color={colors.textMuted}>Şoförler yükleniyor</AppText> : null}
         {drivers.data?.results.map((driver) => (
           <SelectionRow
             key={driver.id}
             title={`${driver.first_name} ${driver.last_name}`}
             subtitle={driver.identity_no}
-            active={draft.driver === driver.id}
-            onPress={() => patchDraft({ driver: driver.id })}
+            active={draft.driver_ids.includes(driver.id)}
+            onPress={() => patchDraft({ driver_ids: toggleId(draft.driver_ids, driver.id) })}
           />
         ))}
       </Card>
@@ -439,10 +446,11 @@ function SelectionRow({ title, subtitle, active, onPress }: { title: string; sub
 
 function draftFromTrip(trip: Trip): EditDraft {
   const group = trip.groups[0];
+  const driverIds = (trip.personnel || []).filter((item) => item.role === "driver").map((item) => item.personnel.id);
   return {
     description: trip.description || "",
     vehicle: trip.vehicle,
-    driver: trip.driver,
+    driver_ids: driverIds.length ? driverIds : [trip.driver],
     departure_at: trip.departure_at,
     arrival_estimated_at: trip.arrival_estimated_at || trip.departure_at,
     departure_city: trip.departure_city || "",
@@ -467,11 +475,16 @@ function draftFromTrip(trip: Trip): EditDraft {
   };
 }
 
+function toggleId(ids: string[], id: string) {
+  return ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id];
+}
+
 function payloadFromDraft(draft: EditDraft): TripUpdatePayload {
   return {
     description: draft.description,
     vehicle: draft.vehicle,
-    driver: draft.driver,
+    driver: draft.driver_ids[0],
+    driver_ids: draft.driver_ids,
     departure_at: draft.departure_at,
     arrival_estimated_at: draft.arrival_estimated_at || null,
     departure_city: draft.departure_city,
@@ -561,6 +574,9 @@ function newPassengerDraft(groupId: string): PassengerEditDraft {
 }
 
 function firstDraftError(draft: EditDraft) {
+  if (!draft.driver_ids.length) {
+    return "En az bir şoför seçilmeli.";
+  }
   if (!draft.passengers.length) {
     return "En az bir yolcu eklenmeli.";
   }

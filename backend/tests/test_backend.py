@@ -1046,6 +1046,61 @@ def test_quick_create_uses_existing_vehicle_and_driver_ids():
     trip = Trip.objects.get(id=response.data["trip_id"])
     assert trip.vehicle == vehicle
     assert trip.driver == driver
+    assert list(trip.trip_personnel.filter(role="driver").values_list("personnel_id", flat=True)) == [driver.id]
+
+
+def test_quick_create_accepts_multiple_driver_ids():
+    user = make_user()
+    company = make_company("Çok Şoför Firma")
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="48 AAL 247", seat_capacity=16)
+    driver_a = Personnel.objects.create(
+        company=company,
+        type="driver",
+        identity_no="57400000208",
+        first_name="Hüseyin",
+        last_name="Akbay",
+        nationality="TR",
+        uetds_role_code=0,
+    )
+    driver_b = Personnel.objects.create(
+        company=company,
+        type="driver",
+        identity_no="17951639708",
+        first_name="Çağrı",
+        last_name="Akbay",
+        nationality="TR",
+        uetds_role_code=0,
+    )
+    payload = {
+        "departure_at": "2026-06-14T18:00:00+03:00",
+        "arrival_estimated_at": "2026-06-14T20:30:00+03:00",
+        "vehicle_id": str(vehicle.id),
+        "driver_ids": [str(driver_a.id), str(driver_b.id)],
+        "route": {
+            "from": {"country": "TR", "city": "Muğla", "district": "Fethiye", "city_code": "48", "district_code": "1331", "address": "Göcek"},
+            "to": {"country": "TR", "city": "Muğla", "district": "Dalaman Havalimanı", "city_code": "48", "district_code": "99125", "address": "Dalaman Havalimanı"},
+        },
+        "groups": [{"name": "TRANSFER", "description": "Göcek transfer", "price": "900.00"}],
+        "passengers": [
+            {
+                "first_name": "Gerrad",
+                "last_name": "Ferguson",
+                "identity_type": "passport",
+                "identity_no": "NRF00000974",
+                "nationality": "GB",
+                "country_name": "İngiltere",
+            }
+        ],
+    }
+
+    response = auth_client(user, company).post("/api/v1/trips/quick-create/", payload, format="json")
+
+    assert response.status_code == 200
+    trip = Trip.objects.get(id=response.data["trip_id"])
+    assert trip.driver == driver_a
+    assert set(trip.trip_personnel.filter(role="driver").values_list("personnel_id", flat=True)) == {driver_a.id, driver_b.id}
+    assert response.data["validation"]["missing_fields"] == []
 
 
 def test_duplicate_clears_firm_trip_no_so_uetds_uses_new_trip_uuid():
@@ -1155,6 +1210,33 @@ def test_trip_can_be_edited_before_uetds_submission():
     assert trip.description == "Düzenlenen açıklama"
     assert trip.departure_address == "Göcek Marina"
     assert trip.arrival_address == "Dalaman Havalimanı"
+
+
+def test_trip_edit_accepts_multiple_driver_ids():
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver_a = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    driver_b = Personnel.objects.create(company=company, type="driver", first_name="C", last_name="D", identity_no="22222222220")
+    trip = _trip(company, user, vehicle, driver_a)
+
+    response = auth_client(user, company).patch(
+        f"/api/v1/trips/{trip.id}/",
+        {"driver_ids": [str(driver_a.id), str(driver_b.id)]},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    trip.refresh_from_db()
+    assert trip.driver == driver_a
+    assert set(trip.trip_personnel.filter(role="driver").values_list("personnel_id", flat=True)) == {driver_a.id, driver_b.id}
+    response_driver_ids = {
+        item["personnel"]["id"]
+        for item in response.data["personnel"]
+        if item["role"] == "driver"
+    }
+    assert response_driver_ids == {str(driver_a.id), str(driver_b.id)}
 
 
 def test_trip_can_be_edited_after_uetds_submission_and_marks_update_required():
@@ -1824,6 +1906,38 @@ def test_uetds_trip_payload_omits_driver_phone_for_vehicle_phone_field():
     payload = UetdsAriziClient(credential)._sefer_payload(trip)
 
     assert "aracTelefonu" not in payload
+
+
+def test_submit_uetds_sends_all_selected_drivers(monkeypatch):
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver_a = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    driver_b = Personnel.objects.create(company=company, type="driver", first_name="C", last_name="D", identity_no="22222222220")
+    trip = _trip(company, user, vehicle, driver_a)
+    TripPersonnel.objects.create(company=company, trip=trip, personnel=driver_b, role="driver")
+    credential = UETDSCredential(company=company, environment="test", endpoint_url="https://example.test")
+    credential.set_username("user")
+    credential.set_password("pass")
+    credential.save()
+    sent_personnel = []
+
+    monkeypatch.setattr("uetds.client.UetdsAriziClient.sefer_ekle", lambda self, trip: UETDSResponse("seferEkle", True, "0", "OK", {"uetds_reference_no": "123"}))
+    monkeypatch.setattr("uetds.client.UetdsAriziClient.sefer_grup_ekle", lambda self, trip, group: UETDSResponse("seferGrupEkle", True, "0", "OK", {"uetds_group_ref_no": "1"}))
+
+    def fake_personel_ekle(self, trip, personnel):
+        sent_personnel.append(personnel.identity_no)
+        return UETDSResponse("personelEkle", True, "0", "OK", {})
+
+    monkeypatch.setattr("uetds.client.UetdsAriziClient.personel_ekle", fake_personel_ekle)
+    monkeypatch.setattr("uetds.client.UetdsAriziClient.yolcu_ekle_coklu", lambda self, trip, passengers: UETDSResponse("yolcuEkleCoklu", True, "0", "OK", {}))
+    monkeypatch.setattr("uetds.client.UetdsAriziClient.bildirim_ozeti", lambda self, ref: UETDSResponse("bildirimOzeti", True, "0", "OK", {}))
+
+    response = auth_client(user, company).post(f"/api/v1/trips/{trip.id}/submit-uetds/", {"environment": "test"}, format="json")
+
+    assert response.status_code == 200
+    assert set(sent_personnel) == {"11111111110", "22222222220"}
 
 
 def test_seed_uetds_test_creates_test_ready_data():

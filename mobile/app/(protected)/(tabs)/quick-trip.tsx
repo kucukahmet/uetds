@@ -57,7 +57,7 @@ type WizardState = {
   departure_at: string;
   arrival_estimated_at: string;
   selected_vehicle_id: string;
-  selected_driver_id: string;
+  selected_driver_ids: string[];
   vehicle: {
     plate: string;
     seat_capacity: string;
@@ -160,6 +160,32 @@ function emptyLocation(): LocationDraft {
   };
 }
 
+function emptyDriverDraft(): WizardState["driver"] {
+  return {
+    identity_no: "",
+    first_name: "",
+    last_name: "",
+    nationality: "TR",
+    gender: "E",
+    phone: "",
+    src_codes: "",
+    uetds_role_code: 0
+  };
+}
+
+function driverToDraft(driver: Personnel): WizardState["driver"] {
+  return {
+    identity_no: driver.identity_no,
+    first_name: driver.first_name,
+    last_name: driver.last_name,
+    nationality: driver.nationality || "TR",
+    gender: driver.gender || "E",
+    phone: driver.phone || "",
+    src_codes: driver.src_codes || "",
+    uetds_role_code: driver.uetds_role_code ?? 0
+  };
+}
+
 function initialState(): WizardState {
   const departure = roundToNextQuarter(new Date(Date.now() + 60 * 60 * 1000));
   const arrival = addMinutes(departure, 150);
@@ -167,21 +193,12 @@ function initialState(): WizardState {
     departure_at: toLocalIso(departure),
     arrival_estimated_at: toLocalIso(arrival),
     selected_vehicle_id: "",
-    selected_driver_id: "",
+    selected_driver_ids: [],
     vehicle: {
       plate: "",
       seat_capacity: "16"
     },
-    driver: {
-      identity_no: "",
-      first_name: "",
-      last_name: "",
-      nationality: "TR",
-      gender: "E",
-      phone: "",
-      src_codes: "",
-      uetds_role_code: 0
-    },
+    driver: emptyDriverDraft(),
     route: {
       preset_id: "",
       from: emptyLocation(),
@@ -456,17 +473,21 @@ function VehicleStep({
     setVehicle({ plate: vehicle.plate, seat_capacity: String(vehicle.seat_capacity || 1) });
   };
   const chooseDriver = (driver: Personnel) => {
-    setPartial({ selected_driver_id: driver.id });
-    setDriver({
-      identity_no: driver.identity_no,
-      first_name: driver.first_name,
-      last_name: driver.last_name,
-      nationality: driver.nationality || "TR",
-      gender: driver.gender || "E",
-      phone: driver.phone || "",
-      src_codes: driver.src_codes || "",
-      uetds_role_code: driver.uetds_role_code ?? 0
-    });
+    const selected = state.selected_driver_ids.includes(driver.id);
+    if (selected) {
+      const nextIds = state.selected_driver_ids.filter((id) => id !== driver.id);
+      setPartial({ selected_driver_ids: nextIds });
+      if (state.driver.identity_no === driver.identity_no) {
+        const nextPrimary = drivers.find((item) => item.id === nextIds[0]);
+        setDriver(nextPrimary ? driverToDraft(nextPrimary) : emptyDriverDraft());
+      }
+      return;
+    }
+    const nextIds = [...state.selected_driver_ids, driver.id];
+    setPartial({ selected_driver_ids: nextIds });
+    if (!state.selected_driver_ids.length) {
+      setDriver(driverToDraft(driver));
+    }
   };
 
   return (
@@ -491,7 +512,12 @@ function VehicleStep({
       </Card>
       <Card>
         <View style={styles.sectionHeader}>
-          <AppText variant="titleLg">Şoför Seç</AppText>
+          <View>
+            <AppText variant="titleLg">Şoförleri Seç</AppText>
+            <AppText variant="labelMd" color={colors.textMuted}>
+              {state.selected_driver_ids.length ? `${state.selected_driver_ids.length} şoför seçildi` : "En az bir şoför seçilmeli"}
+            </AppText>
+          </View>
           <Button label="Yeni Şoför" icon="add" variant="ghost" onPress={() => router.push("/records/add-driver")} />
         </View>
         {!isLoading && drivers.length === 0 ? <EmptySelection label="Kayıtlı aktif şoför yok" /> : null}
@@ -500,8 +526,8 @@ function VehicleStep({
             key={driver.id}
             title={`${driver.first_name} ${driver.last_name}`}
             subtitle={`${driver.identity_no}${driver.src_codes ? ` - ${driver.src_codes}` : ""}`}
-            meta={driver.uetds_last_checked_at ? "UETDS Onaylı" : undefined}
-            active={state.selected_driver_id === driver.id}
+            meta={state.selected_driver_ids.includes(driver.id) ? "Seçili" : driver.uetds_last_checked_at ? "UETDS Onaylı" : undefined}
+            active={state.selected_driver_ids.includes(driver.id)}
             onPress={() => chooseDriver(driver)}
           />
         ))}
@@ -807,13 +833,15 @@ function PassengerCard({
 function ReviewStep({ state, payload, errors }: { state: WizardState; payload: QuickCreatePayload; errors: string[] }) {
   const vehicle = payload.vehicle;
   const driver = payload.driver;
+  const driverCount = state.selected_driver_ids.length;
+  const driverLabel = driverCount > 1 ? `${driver?.first_name || "-"} ${driver?.last_name || ""} + ${driverCount - 1} şoför` : `${driver?.first_name || "-"} ${driver?.last_name || ""}`;
   return (
     <>
       <Card>
         <AppText variant="titleLg">Kontrol</AppText>
         <SummaryRow label="Sefer" value={`${formatDateTime(state.departure_at)} - ${formatDateTime(state.arrival_estimated_at)}`} />
         <SummaryRow label="Araç" value={`${vehicle?.plate || "-"} / ${vehicle?.seat_capacity || "-"} koltuk`} />
-        <SummaryRow label="Şoför" value={`${driver?.first_name || "-"} ${driver?.last_name || ""}`} />
+        <SummaryRow label="Şoförler" value={driverLabel} />
         <SummaryRow label="Rota" value={`${payload.route.from.place || payload.route.from.address} -> ${payload.route.to.place || payload.route.to.address}`} />
         <SummaryRow label="Grup" value={`${state.group.name} / ${state.group.price || "-"} ${state.group.currency}`} />
         <SummaryRow label="Yolcu" value={`${payload.passengers.length} kişi`} />
@@ -1092,7 +1120,8 @@ function buildPayload(state: WizardState): QuickCreatePayload {
     arrival_estimated_at: state.arrival_estimated_at,
     description: state.group.description,
     vehicle_id: state.selected_vehicle_id || undefined,
-    driver_id: state.selected_driver_id || undefined,
+    driver_id: state.selected_driver_ids[0] || undefined,
+    driver_ids: state.selected_driver_ids.length ? state.selected_driver_ids : undefined,
     vehicle: {
       plate: normalizePlate(state.vehicle.plate),
       seat_capacity: Number(state.vehicle.seat_capacity || 1)
@@ -1169,7 +1198,7 @@ function validateAll(state: WizardState) {
     errors.push("Bitiş zamanı hareketten sonra olmalı.");
   }
   if (!state.selected_vehicle_id) errors.push("Araç seçilmeli.");
-  if (!state.selected_driver_id) errors.push("Şoför seçilmeli.");
+  if (!state.selected_driver_ids.length) errors.push("Şoför seçilmeli.");
   if (!payload.route.from.city || !payload.route.from.district) errors.push("Biniş yeri seçilmeli.");
   if (!payload.route.from.place && !payload.route.from.address) errors.push("Biniş adres detayı zorunlu.");
   if (!payload.route.to.city || !payload.route.to.district) errors.push("İniş yeri seçilmeli.");

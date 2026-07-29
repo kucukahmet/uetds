@@ -212,6 +212,7 @@ export type Trip = {
   uetds_sync_message: string;
   uetds_last_error: TripUetdsLastError | null;
   groups: TripGroup[];
+  personnel: Array<{ id: string; personnel: Personnel; role: string }>;
   passengers: Array<{ id: string; passenger: Passenger; group_id: string | null; status: string; seat_no: string }>;
 };
 
@@ -222,6 +223,7 @@ export type QuickCreatePayload = {
   description?: string;
   vehicle_id?: string;
   driver_id?: string;
+  driver_ids?: string[];
   vehicle?: { id?: string; plate: string; brand?: string; model?: string; seat_capacity?: number; phone?: string };
   driver?: {
     id?: string;
@@ -352,6 +354,7 @@ export type TripUpdatePayload = Partial<{
   description: string;
   vehicle: string;
   driver: string;
+  driver_ids: string[];
   departure_at: string;
   arrival_estimated_at: string | null;
   departure_city: string;
