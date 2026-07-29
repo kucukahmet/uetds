@@ -10,8 +10,7 @@ import { StickyActionBar } from "@/components/StickyActionBar";
 import { colors } from "@/theme/tokens";
 
 export default function SubmitSuccessScreen() {
-  const { tripId, ref, environment } = useLocalSearchParams<{ tripId?: string; ref?: string; environment?: string }>();
-  const isLive = environment === "live";
+  const { tripId, ref } = useLocalSearchParams<{ tripId?: string; ref?: string; environment?: string }>();
   return (
     <Screen
       footer={
@@ -20,9 +19,9 @@ export default function SubmitSuccessScreen() {
         </StickyActionBar>
       }
     >
-      <PageHeader title="Gönderim Başarılı" right={<Badge status={isLive ? "live" : "submitted"} />} fallbackHref={tripId ? `/trips/${tripId}` : "/trips"} />
+      <PageHeader title="Gönderim Başarılı" right={<Badge status="submitted" />} fallbackHref={tripId ? `/trips/${tripId}` : "/trips"} />
       <Card>
-        <AppText variant="titleLg">{isLive ? "Gerçek UETDS" : "UETDS Test"}</AppText>
+        <AppText variant="titleLg">UETDS Kaydı Oluşturuldu</AppText>
         <AppText color={colors.textMuted}>Referans: {ref || "-"}</AppText>
       </Card>
     </Screen>

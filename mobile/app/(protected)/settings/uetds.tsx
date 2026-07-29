@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { StyleSheet } from "react-native";
 
 import { endpoints } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
@@ -12,46 +12,22 @@ import { PageHeader } from "@/components/PageHeader";
 import { Screen } from "@/components/Screen";
 import { TextField } from "@/components/TextField";
 import { formatDateTime } from "@/lib/format";
+import { getActiveUetdsStatus, getCompanyUetdsEnvironment, uetdsConnectionBadgeStatus, uetdsConnectionLabel, uetdsConnectionMessage } from "@/lib/uetdsStatus";
 import { getActiveCompany, useAuthStore } from "@/store/auth";
 import { colors } from "@/theme/tokens";
-import type { CompanySettings, UetdsStatus, User } from "@/types/api";
-
-type UetdsEnvironment = keyof UetdsStatus;
+import type { UetdsStatus } from "@/types/api";
 
 export default function UetdsSettingsScreen() {
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const activeCompanyId = useAuthStore((state) => state.activeCompanyId);
-  const setSession = useAuthStore((state) => state.setSession);
   const company = getActiveCompany(user, activeCompanyId);
-  const defaultEnvironment = company?.settings?.default_uetds_environment || "test";
-  const [environment, setEnvironment] = useState<UetdsEnvironment>("test");
+  const environment = getCompanyUetdsEnvironment(company);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const status = useQuery({ queryKey: queryKeys.uetdsStatus(), queryFn: endpoints.uetdsStatus });
-  const selectedStatus = status.data?.[environment];
+  const selectedStatus = getActiveUetdsStatus(status.data, company);
   const tone = statusTone(selectedStatus?.severity);
-  const isLive = environment === "live";
-  useEffect(() => {
-    setEnvironment(defaultEnvironment);
-  }, [defaultEnvironment]);
-  const saveEnvironment = useMutation({
-    mutationFn: (nextEnvironment: UetdsEnvironment) => {
-      if (!company) {
-        throw new Error("Aktif firma bulunamadı.");
-      }
-      return endpoints.updateCompanySettings(company.id, {
-        default_uetds_environment: nextEnvironment,
-        ...(nextEnvironment === "live" ? { live_uetds_enabled: true } : {})
-      });
-    },
-    onSuccess: async (settings) => {
-      if (user && company && settings) {
-        await setSession({ user: withUpdatedCompanySettings(user, company.id, settings) });
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.uetdsStatus() });
-    }
-  });
   const save = useMutation({
     mutationFn: () => endpoints.saveUetdsCredentials(environment, username.trim(), password),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.uetdsStatus() })
@@ -64,51 +40,26 @@ export default function UetdsSettingsScreen() {
     mutationFn: () => endpoints.ipList(environment),
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.uetdsStatus() })
   });
-  const selectEnvironment = (nextEnvironment: UetdsEnvironment) => {
-    setEnvironment(nextEnvironment);
-    setUsername("");
-    setPassword("");
-    save.reset();
-    verify.reset();
-    ipList.reset();
-    if (nextEnvironment !== defaultEnvironment) {
-      saveEnvironment.mutate(nextEnvironment);
-    }
-  };
 
   return (
     <Screen refreshing={status.isFetching} onRefresh={() => void status.refetch()}>
-      <PageHeader title="UETDS Ayarları" right={<Badge status={environment} />} fallbackHref="/settings" />
-      <View style={styles.segmented}>
-        {(["test", "live"] as const).map((item) => {
-          const active = item === environment;
-          return (
-            <Pressable
-              key={item}
-              accessibilityRole="button"
-              onPress={() => selectEnvironment(item)}
-              style={[styles.segment, active ? styles.segmentActive : null]}
-            >
-              <AppText variant="labelLg" color={active ? colors.surface : colors.textMuted}>
-                {environmentLabel(item)}
-              </AppText>
-            </Pressable>
-          );
-        })}
-      </View>
+      <PageHeader
+        title="UETDS Ayarları"
+        right={<Badge status={uetdsConnectionBadgeStatus(selectedStatus)} label={uetdsConnectionLabel(selectedStatus)} />}
+        fallbackHref="/settings"
+      />
       <Card style={[styles.statusCard, tone.card]}>
-        <Badge status={environment} />
+        <Badge status={uetdsConnectionBadgeStatus(selectedStatus)} label={uetdsConnectionLabel(selectedStatus)} />
         <AppText variant="titleLg" color={tone.text}>
-          {statusTitle(selectedStatus, environment, status.data)}
+          {statusTitle(selectedStatus, status.data)}
         </AppText>
-        <AppText color={tone.text}>{selectedStatus?.message || statusMessage(environment, status.data)}</AppText>
+        <AppText color={tone.text}>{uetdsConnectionMessage(selectedStatus)}</AppText>
         <AppText color={colors.textMuted}>Son doğrulama: {formatNullableDate(selectedStatus?.last_verified_at)}</AppText>
         {selectedStatus?.last_error_at ? <AppText color={colors.textMuted}>Son hata: {formatDateTime(selectedStatus.last_error_at)}</AppText> : null}
         {selectedStatus?.last_log_id ? <AppText color={colors.textMuted}>Log ID: {selectedStatus.last_log_id}</AppText> : null}
-        {saveEnvironment.isPending ? <AppText color={colors.textMuted}>Ortam seçimi kaydediliyor...</AppText> : null}
       </Card>
       <Card>
-        <AppText variant="titleLg">{isLive ? "Gerçek UETDS Bilgileri" : "Test UETDS Bilgileri"}</AppText>
+        <AppText variant="titleLg">UETDS Bilgileri</AppText>
         <TextField label="Kullanıcı adı" value={username} onChangeText={setUsername} autoCapitalize="none" />
         <TextField label="Şifre" value={password} onChangeText={setPassword} secureTextEntry />
         <Button label="Kaydet" icon="save" loading={save.isPending} disabled={!username.trim() || !password} onPress={() => save.mutate()} />
@@ -122,12 +73,12 @@ export default function UetdsSettingsScreen() {
         onPress={() => verify.mutate()}
       />
       <Button label="IP Listele" icon="list" variant="ghost" loading={ipList.isPending} disabled={!selectedStatus?.configured} onPress={() => ipList.mutate()} />
-      {mutationError(verify.error || ipList.error || save.error || saveEnvironment.error) ? (
+      {mutationError(verify.error || ipList.error || save.error) ? (
         <Card style={styles.errorCard}>
           <AppText variant="titleLg" color={colors.error}>
             İşlem tamamlanamadı
           </AppText>
-          <AppText color={colors.error}>{mutationError(verify.error || ipList.error || save.error || saveEnvironment.error)}</AppText>
+          <AppText color={colors.error}>{mutationError(verify.error || ipList.error || save.error)}</AppText>
         </Card>
       ) : null}
       {verify.data ? (
@@ -146,31 +97,23 @@ export default function UetdsSettingsScreen() {
   );
 }
 
-function statusTitle(status: Partial<UetdsStatus["test"]> | undefined, environment: UetdsEnvironment, data?: Partial<UetdsStatus>) {
-  const label = environmentLabel(environment);
+function statusTitle(status: Partial<UetdsStatus["test"]> | undefined, data?: Partial<UetdsStatus>) {
   if (data && !status) {
-    return `${label} ortam kapalı`;
+    return "Bağlantı durumu alınamadı";
   }
   if (!status) {
     return "Durum yükleniyor";
   }
   if (status.status === "verified") {
-    return `${label} bağlantısı hazır`;
+    return "Bağlantı hazır";
   }
   if (status.status === "pending") {
     return "Doğrulama bekliyor";
   }
   if (status.status === "failed") {
-    return "UETDS doğrulama hatalı";
+    return "Bağlantı hatalı";
   }
-  return "Credential eksik";
-}
-
-function statusMessage(environment: UetdsEnvironment, data?: Partial<UetdsStatus>) {
-  if (data && !data[environment]) {
-    return environment === "live" ? "Gerçek UETDS ortamı backend'de kapalı." : "Test ortam durumu alınamadı.";
-  }
-  return environment === "live" ? "Gerçek UETDS durumu yükleniyor." : "UETDS test durumu yükleniyor.";
+  return "Bağlı değil";
 }
 
 function statusTone(severity?: UetdsStatus["test"]["severity"]) {
@@ -191,38 +134,7 @@ function mutationError(error: unknown) {
   return error instanceof Error ? error.message : "";
 }
 
-function environmentLabel(environment: UetdsEnvironment) {
-  return environment === "live" ? "Gerçek UETDS" : "Test";
-}
-
-function withUpdatedCompanySettings(user: User, companyId: string, settings: CompanySettings): User {
-  return {
-    ...user,
-    memberships: user.memberships.map((membership) =>
-      membership.company.id === companyId
-        ? { ...membership, company: { ...membership.company, settings } }
-        : membership
-    )
-  };
-}
-
 const styles = StyleSheet.create({
-  segmented: {
-    backgroundColor: colors.surfaceStrong,
-    borderRadius: 12,
-    flexDirection: "row",
-    padding: 4
-  },
-  segment: {
-    alignItems: "center",
-    borderRadius: 10,
-    flex: 1,
-    minHeight: 44,
-    justifyContent: "center"
-  },
-  segmentActive: {
-    backgroundColor: colors.primary
-  },
   statusCard: {
     borderWidth: 1
   },

@@ -14,9 +14,7 @@ const statusMap: Record<string, { label: string; bg: string; fg: string }> = {
   cancel_requested: { label: "İptal Ediliyor", bg: colors.warningSoft, fg: "#604100" },
   cancelled: { label: "İptal Edildi", bg: colors.surfaceStrong, fg: colors.textMuted },
   active: { label: "Aktif", bg: colors.secondarySoft, fg: colors.secondary },
-  passive: { label: "Pasif", bg: colors.surfaceStrong, fg: colors.textMuted },
-  test: { label: "TEST", bg: "#EDE7F6", fg: colors.uetdsTest },
-  live: { label: "GERÇEK", bg: colors.warningSoft, fg: "#604100" }
+  passive: { label: "Pasif", bg: colors.surfaceStrong, fg: colors.textMuted }
 };
 
 export function Badge({ status, label }: { status?: TripStatus | string; label?: string }) {

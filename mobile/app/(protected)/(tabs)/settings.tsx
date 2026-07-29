@@ -15,7 +15,7 @@ export default function SettingsScreen() {
     <Screen>
       <AppText variant="headlineMd">Ayarlar</AppText>
       <ListRow title="Firma" subtitle={company?.name || "-"} icon="business" onPress={() => router.push("/settings/company")} />
-      <ListRow title="UETDS Ortamları" subtitle="Test/gerçek credential, verify, IP list" icon="shield-checkmark" onPress={() => router.push("/settings/uetds")} />
+      <ListRow title="UETDS Bağlantısı" subtitle="Kullanıcı bilgileri, doğrulama, IP listesi" icon="shield-checkmark" onPress={() => router.push("/settings/uetds")} />
       <ListRow title="UETDS Logları" subtitle="SOAP işlem geçmişi" icon="receipt" onPress={() => router.push("/settings/logs")} />
       <ListRow title="Çıkış Yap" subtitle={user?.email} icon="log-out" onPress={() => void logout().then(() => router.replace("/(auth)/login"))} />
     </Screen>

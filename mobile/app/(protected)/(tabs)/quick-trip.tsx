@@ -6,7 +6,6 @@ import { Alert, Animated, Platform, Pressable, StyleSheet, View, type TextInputP
 import { endpoints } from "@/api/endpoints";
 import { queryKeys } from "@/api/queryKeys";
 import { AppText } from "@/components/AppText";
-import { Badge } from "@/components/Badge";
 import { Button, IconButton } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { CountrySelectField } from "@/components/CountrySelectField";
@@ -389,7 +388,6 @@ export default function QuickTripScreen() {
           <AppText variant="headlineMd">Hızlı Sefer</AppText>
           <AppText color={colors.textMuted}>{steps[stepIndex]}</AppText>
         </View>
-        <Badge status="test" />
       </View>
       <StepIndicator current={stepIndex} />
 

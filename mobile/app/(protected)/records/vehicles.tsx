@@ -21,9 +21,8 @@ export default function VehiclesScreen() {
     mutationFn: (id: string) => endpoints.vehicleUetdsCheck(id),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.vehiclesRoot() });
-      const environmentLabel = result.environment === "live" ? "gerçek UETDS" : "test UETDS";
       const message = result.message || result.checks?.find((item) => !item.success)?.message || "Araç kontrolünde hata döndü.";
-      showPopup("UETDS kontrolü tamamlandı", result.valid ? `Araç ${environmentLabel} sorgularından geçti.` : message);
+      showPopup("UETDS kontrolü tamamlandı", result.valid ? "Araç UETDS sorgularından geçti." : message);
     },
     onError: (error) => {
       showErrorPopup("UETDS kontrolü tamamlanamadı", error, "UETDS sorgusu çalıştırılamadı.");

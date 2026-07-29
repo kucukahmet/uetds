@@ -12,6 +12,7 @@ import { ListRow } from "@/components/ListRow";
 import { Screen } from "@/components/Screen";
 import { EmptyState, LoadingState } from "@/components/StateViews";
 import { formatDateTime } from "@/lib/format";
+import { getActiveUetdsStatus, uetdsConnectionBadgeStatus, uetdsConnectionLabel, uetdsConnectionMessage } from "@/lib/uetdsStatus";
 import { getActiveCompany, useAuthStore } from "@/store/auth";
 import { colors, spacing } from "@/theme/tokens";
 import type { UetdsStatus } from "@/types/api";
@@ -20,11 +21,10 @@ export default function HomeScreen() {
   const user = useAuthStore((state) => state.user);
   const activeCompanyId = useAuthStore((state) => state.activeCompanyId);
   const company = getActiveCompany(user, activeCompanyId);
-  const uetdsEnvironment = company?.settings?.default_uetds_environment || "test";
   const trips = useQuery({ queryKey: queryKeys.trips("?ordering=-departure_at"), queryFn: () => endpoints.trips("?ordering=-departure_at") });
   const uetds = useQuery({ queryKey: queryKeys.uetdsStatus(), queryFn: endpoints.uetdsStatus });
   const recentTrips = trips.data?.results.slice(0, 3) ?? [];
-  const selectedStatus = uetds.data?.[uetdsEnvironment];
+  const selectedStatus = getActiveUetdsStatus(uetds.data, company);
   const selectedTone = statusTone(selectedStatus?.severity);
 
   return (
@@ -34,7 +34,7 @@ export default function HomeScreen() {
           <AppText variant="headlineMd">Ana Sayfa</AppText>
           <AppText color={colors.textMuted}>{company?.name || "Firma seçilmedi"}</AppText>
         </View>
-        <Badge status={uetdsEnvironment} />
+        <Badge status={uetdsConnectionBadgeStatus(selectedStatus)} label={uetdsConnectionLabel(selectedStatus)} />
       </View>
 
       <View style={styles.actions}>
@@ -49,10 +49,10 @@ export default function HomeScreen() {
         </Card>
         <Card style={[styles.stat, selectedTone.card]}>
           <AppText variant="headlineMd" color={selectedTone.text}>
-            {uetdsStatusLabel(selectedStatus)}
+            {uetdsConnectionLabel(selectedStatus)}
           </AppText>
-          <AppText color={colors.textMuted}>{uetdsEnvironment === "live" ? "Gerçek UETDS" : "UETDS Test"}</AppText>
-          {selectedStatus?.message ? <AppText color={selectedTone.text}>{selectedStatus.message}</AppText> : null}
+          <AppText color={colors.textMuted}>UETDS Bağlantısı</AppText>
+          <AppText color={selectedTone.text}>{uetdsConnectionMessage(selectedStatus)}</AppText>
         </Card>
       </View>
 
@@ -102,19 +102,6 @@ const styles = StyleSheet.create({
     borderColor: colors.error
   }
 });
-
-function uetdsStatusLabel(status?: UetdsStatus["test"]) {
-  if (!status) {
-    return "-";
-  }
-  if (status.status === "verified") {
-    return "Bağlı";
-  }
-  if (status.status === "pending") {
-    return "Bekliyor";
-  }
-  return "Eksik";
-}
 
 function statusTone(severity?: UetdsStatus["test"]["severity"]) {
   if (severity === "success") {

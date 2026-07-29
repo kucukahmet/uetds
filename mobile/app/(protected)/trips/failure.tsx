@@ -10,8 +10,7 @@ import { StickyActionBar } from "@/components/StickyActionBar";
 import { colors } from "@/theme/tokens";
 
 export default function SubmitFailureScreen() {
-  const { tripId, message, environment } = useLocalSearchParams<{ tripId?: string; message?: string; environment?: string }>();
-  const isLive = environment === "live";
+  const { tripId, message } = useLocalSearchParams<{ tripId?: string; message?: string; environment?: string }>();
   return (
     <Screen
       footer={
@@ -20,9 +19,9 @@ export default function SubmitFailureScreen() {
         </StickyActionBar>
       }
     >
-      <PageHeader title="Gönderim Başarısız" right={<Badge status={isLive ? "live" : "failed"} />} fallbackHref={tripId ? `/trips/${tripId}` : "/trips"} />
+      <PageHeader title="Gönderim Başarısız" right={<Badge status="failed" />} fallbackHref={tripId ? `/trips/${tripId}` : "/trips"} />
       <Card>
-        <AppText variant="titleLg">{isLive ? "Gerçek UETDS" : "UETDS Test"}</AppText>
+        <AppText variant="titleLg">UETDS Gönderimi Tamamlanamadı</AppText>
         <AppText color={colors.error}>{message || "İşlem tamamlanamadı"}</AppText>
       </Card>
     </Screen>

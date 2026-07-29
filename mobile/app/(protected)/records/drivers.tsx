@@ -25,8 +25,7 @@ export default function DriversScreen() {
     mutationFn: (id: string) => endpoints.personnelUetdsCheck(id),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.personnelRoot() });
-      const environmentLabel = result.environment === "live" ? "gerçek UETDS" : "test UETDS";
-      showPopup("UETDS kontrolü tamamlandı", result.valid ? `Şoför ${environmentLabel} sorgusundan geçti.` : result.message || "Şoför kontrolünde hata döndü.");
+      showPopup("UETDS kontrolü tamamlandı", result.valid ? "Şoför UETDS sorgusundan geçti." : result.message || "Şoför kontrolünde hata döndü.");
     },
     onError: (error) => {
       showErrorPopup("UETDS kontrolü tamamlanamadı", error, "UETDS sorgusu çalıştırılamadı.");

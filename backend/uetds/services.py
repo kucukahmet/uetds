@@ -31,7 +31,7 @@ CREDENTIAL_MISSING_CODE = "UETDS_CREDENTIAL_MISSING"
 
 
 def validate_environment(environment):
-    environment = environment or "test"
+    environment = environment or get_configured_default_environment()
     if environment not in settings.UETDS_ALLOWED_ENVIRONMENTS:
         raise ValidationError(
             {
@@ -42,6 +42,13 @@ def validate_environment(environment):
             }
         )
     return environment
+
+
+def get_configured_default_environment():
+    configured_environment = getattr(settings, "UETDS_ENV", "test") or "test"
+    if configured_environment in settings.UETDS_ALLOWED_ENVIRONMENTS:
+        return configured_environment
+    return settings.UETDS_ALLOWED_ENVIRONMENTS[0]
 
 
 def get_endpoint(environment):
@@ -136,10 +143,10 @@ def set_step(company, trip, operation, status, log=None):
 
 def get_company_default_environment(company):
     try:
-        environment = company.settings.default_uetds_environment
+        environment = company.settings.default_uetds_environment or get_configured_default_environment()
     except ObjectDoesNotExist:
-        environment = "test"
-    return validate_environment(environment or "test")
+        environment = get_configured_default_environment()
+    return validate_environment(environment)
 
 
 def run_vehicle_check(vehicle, user, environment=None):

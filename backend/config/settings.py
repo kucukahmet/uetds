@@ -151,7 +151,12 @@ SPECTACULAR_SETTINGS = {
 
 UETDS_ENV = os.getenv("UETDS_ENV", "test")
 UETDS_ALLOW_LIVE = os.getenv("UETDS_ALLOW_LIVE", "false").lower() == "true"
-UETDS_ALLOWED_ENVIRONMENTS = ("test", "live") if UETDS_ALLOW_LIVE else ("test",)
+UETDS_ALLOWED_ENVIRONMENTS_CONFIG = tuple(
+    environment.strip()
+    for environment in os.getenv("UETDS_ALLOWED_ENVIRONMENTS", "").split(",")
+    if environment.strip() in {"test", "live"}
+)
+UETDS_ALLOWED_ENVIRONMENTS = UETDS_ALLOWED_ENVIRONMENTS_CONFIG or (("test", "live") if UETDS_ALLOW_LIVE else ("test",))
 UETDS_TEST_URL = os.getenv(
     "UETDS_TEST_URL",
     "https://servis.turkiye.gov.tr/services/g2g/kdgm/test/uetdsarizi",
