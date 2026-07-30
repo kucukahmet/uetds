@@ -399,6 +399,8 @@ export default function QuickTripScreen() {
           vehicles={vehicles.data?.results ?? []}
           drivers={drivers.data?.results ?? []}
           isLoading={vehicles.isLoading || drivers.isLoading}
+          showErrors={validationStep === 1}
+          shakeKey={shakeKey}
           setPartial={setPartial}
           setVehicle={setVehicle}
           setDriver={setDriver}
@@ -454,6 +456,8 @@ function VehicleStep({
   vehicles,
   drivers,
   isLoading,
+  showErrors,
+  shakeKey,
   setPartial,
   setVehicle,
   setDriver
@@ -462,6 +466,8 @@ function VehicleStep({
   vehicles: Vehicle[];
   drivers: Personnel[];
   isLoading: boolean;
+  showErrors: boolean;
+  shakeKey: number;
   setPartial: (patch: Partial<WizardState>) => void;
   setVehicle: (patch: Partial<WizardState["vehicle"]>) => void;
   setDriver: (patch: Partial<WizardState["driver"]>) => void;
@@ -488,13 +494,17 @@ function VehicleStep({
     }
   };
 
+  const vehicleError = showErrors && !state.selected_vehicle_id;
+  const driverError = showErrors && !state.selected_driver_ids.length;
+
   return (
     <>
-      <Card>
+      <Card style={vehicleError ? styles.selectionErrorCard : undefined}>
         <View style={styles.sectionHeader}>
           <AppText variant="titleLg">Araç Seç</AppText>
           <Button label="Yeni Araç" icon="add" variant="ghost" onPress={() => router.push("/records/add-vehicle")} />
         </View>
+        {vehicleError ? <SelectionWarning message="Devam etmek için bir araç seçmelisin." shakeKey={shakeKey} /> : null}
         {isLoading ? <AppText color={colors.textMuted}>Kayıtlar yükleniyor</AppText> : null}
         {!isLoading && vehicles.length === 0 ? <EmptySelection label="Kayıtlı aktif araç yok" /> : null}
         {vehicles.map((vehicle) => (
@@ -508,7 +518,7 @@ function VehicleStep({
           />
         ))}
       </Card>
-      <Card>
+      <Card style={driverError ? styles.selectionErrorCard : undefined}>
         <View style={styles.sectionHeader}>
           <View>
             <AppText variant="titleLg">Şoförleri Seç</AppText>
@@ -518,6 +528,7 @@ function VehicleStep({
           </View>
           <Button label="Yeni Şoför" icon="add" variant="ghost" onPress={() => router.push("/records/add-driver")} />
         </View>
+        {driverError ? <SelectionWarning message="Devam etmek için en az bir şoför seçmelisin." shakeKey={shakeKey} /> : null}
         {!isLoading && drivers.length === 0 ? <EmptySelection label="Kayıtlı aktif şoför yok" /> : null}
         {drivers.map((driver) => (
           <SelectionRow
@@ -531,6 +542,16 @@ function VehicleStep({
         ))}
       </Card>
     </>
+  );
+}
+
+function SelectionWarning({ message, shakeKey }: { message: string; shakeKey: number }) {
+  return (
+    <ShakeView hasError shakeKey={shakeKey} style={styles.selectionWarning}>
+      <AppText variant="labelMd" color={colors.error}>
+        {message}
+      </AppText>
+    </ShakeView>
   );
 }
 
@@ -1493,6 +1514,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     borderRadius: radius.md,
     padding: spacing.sm
+  },
+  selectionErrorCard: {
+    backgroundColor: "#FFF8F7",
+    borderColor: "#E7B4AF"
+  },
+  selectionWarning: {
+    backgroundColor: "#FCEAE7",
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
   },
   footerRow: {
     flexDirection: "row",

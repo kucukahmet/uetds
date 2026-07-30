@@ -81,6 +81,7 @@ export default function TripEditScreen() {
   const drivers = useQuery({ queryKey: queryKeys.personnel("?type=driver&status=active"), queryFn: () => endpoints.personnel("?type=driver&status=active") });
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
+  const [validationStep, setValidationStep] = useState<number | null>(null);
 
   useEffect(() => {
     if (tripQuery.data && !draft) {
@@ -135,6 +136,7 @@ export default function TripEditScreen() {
   const next = () => {
     const validationError = firstStepError(draft, stepIndex);
     if (validationError) {
+      setValidationStep(stepIndex);
       Alert.alert("Eksik veya hatalı bilgi", validationError);
       return;
     }
@@ -204,6 +206,7 @@ export default function TripEditScreen() {
           vehicles={vehicles.data?.results ?? []}
           drivers={drivers.data?.results ?? []}
           isLoading={vehicles.isLoading || drivers.isLoading}
+          showErrors={validationStep === 1}
           patchDraft={patchDraft}
         />
       ) : stepIndex === 2 ? (
@@ -247,18 +250,24 @@ function VehicleDriverStep({
   vehicles,
   drivers,
   isLoading,
+  showErrors,
   patchDraft
 }: {
   draft: EditDraft;
   vehicles: Vehicle[];
   drivers: Personnel[];
   isLoading: boolean;
+  showErrors: boolean;
   patchDraft: (patch: Partial<EditDraft>) => void;
 }) {
+  const vehicleError = showErrors && !draft.vehicle;
+  const driverError = showErrors && !draft.driver_ids.length;
+
   return (
     <>
-      <Card>
+      <Card style={vehicleError ? styles.selectionErrorCard : undefined}>
         <AppText variant="titleLg">Araç</AppText>
+        {vehicleError ? <SelectionWarning message="Devam etmek için bir araç seçmelisin." /> : null}
         {isLoading ? <AppText color={colors.textMuted}>Kayıtlar yükleniyor</AppText> : null}
         {vehicles.map((vehicle) => (
           <SelectionRow
@@ -271,7 +280,7 @@ function VehicleDriverStep({
         ))}
       </Card>
 
-      <Card>
+      <Card style={driverError ? styles.selectionErrorCard : undefined}>
         <View style={styles.sectionHeader}>
           <View>
             <AppText variant="titleLg">Şoförler</AppText>
@@ -280,6 +289,7 @@ function VehicleDriverStep({
             </AppText>
           </View>
         </View>
+        {driverError ? <SelectionWarning message="Devam etmek için en az bir şoför seçmelisin." /> : null}
         {drivers.map((driver) => (
           <SelectionRow
             key={driver.id}
@@ -291,6 +301,16 @@ function VehicleDriverStep({
         ))}
       </Card>
     </>
+  );
+}
+
+function SelectionWarning({ message }: { message: string }) {
+  return (
+    <View style={styles.selectionWarning}>
+      <AppText variant="labelMd" color={colors.error}>
+        {message}
+      </AppText>
+    </View>
   );
 }
 
@@ -976,6 +996,16 @@ const styles = StyleSheet.create({
   selectionRowActive: {
     backgroundColor: colors.primarySoft,
     borderColor: colors.primary
+  },
+  selectionErrorCard: {
+    backgroundColor: "#FFF8F7",
+    borderColor: "#E7B4AF"
+  },
+  selectionWarning: {
+    backgroundColor: "#FCEAE7",
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs
   },
   selectionBody: {
     flex: 1,
