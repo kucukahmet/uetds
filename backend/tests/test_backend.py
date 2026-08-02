@@ -582,6 +582,39 @@ def test_passenger_photo_ocr_service_normalizes_common_european_nationalities(mo
     assert result["passengers"][2]["gender"] == "E"
 
 
+def test_passenger_photo_ocr_service_blanks_placeholder_identities(monkeypatch, settings):
+    settings.OPENAI_API_KEY = "test-key"
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"passengers":['
+                                '{"first_name":"ALICIA","last_name":"PIERRE","identity_no":"GA1234567","nationality":"FR"},'
+                                '{"first_name":"MARIA","last_name":"RUIZ","identity_no":"53296757F","nationality":"Spanish"}'
+                                '],"raw_text":""}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("imports.passenger_photo_ocr.requests.post", lambda *args, **kwargs: FakeResponse())
+    image = SimpleUploadedFile("passengers.jpg", b"fake-image", content_type="image/jpeg")
+
+    result = extract_passengers_from_image(image)
+
+    assert result["passengers"][0]["identity_no"] == ""
+    assert result["passengers"][0]["identity_type"] == "unknown"
+    assert result["passengers"][1]["identity_no"] == "53296757F"
+    assert result["passengers"][1]["identity_type"] == "passport"
+
+
 def test_sefer_grup_payload_sends_district_code_and_free_text_place(monkeypatch):
     user = make_user()
     company = make_company("UETDS Rota Firma")

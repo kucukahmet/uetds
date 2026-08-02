@@ -86,7 +86,8 @@ def extract_passengers_from_image(image_file):
                     "role": "system",
                     "content": (
                         "You extract passenger rows from transport manifest photos. "
-                        "Return strict JSON only. Do not invent unreadable fields."
+                        "Return strict JSON only. Do not invent unreadable fields. "
+                        "If a value is blurry, cropped, or uncertain, leave that field empty."
                     ),
                 },
                 {
@@ -105,7 +106,9 @@ def extract_passengers_from_image(image_file):
                                 "Belgian/Belgium gördüğünde BE/Belçika, UK/British gördüğünde GB/İngiltere kullan. "
                                 "Satır numarasını koltuk sanma; yalnızca açıkça koltuk/seat bilgisi varsa seat_no doldur. "
                                 "Fotoğraf tablo şeklindeyse Name/Surname/Passport/Nationality kolonlarını eşleştir; "
-                                "isimlerdeki aksanları ve çok kelimeli soyadlarını koru."
+                                "isimlerdeki aksanları ve çok kelimeli soyadlarını koru. "
+                                "Örnek veya tahmini pasaport üretme; GA1234567, AB1234567, 123456789 gibi "
+                                "placeholder görünümlü değerleri asla yazma. Okuyamıyorsan identity_no alanını boş bırak."
                             ),
                         },
                         {"type": "image_url", "image_url": {"url": data_url}},
@@ -130,6 +133,8 @@ def extract_passengers_from_image(image_file):
 
 def _normalize_passenger(item):
     identity_no = _clean_identity(item.get("identity_no", ""))
+    if _looks_like_placeholder_identity(identity_no):
+        identity_no = ""
     nationality, country_name = _country(item.get("nationality", ""), item.get("country_name", ""))
     return {
         "first_name": _title_name(item.get("first_name", "")),
@@ -167,6 +172,17 @@ def _openai_error_message(response):
 def _clean_identity(value):
     text = str(value or "").replace(" ", "").strip()
     return re.sub(r"\.0+$", "", text).upper()
+
+
+def _looks_like_placeholder_identity(value):
+    text = _clean_identity(value)
+    if not text:
+        return False
+    if re.fullmatch(r"[A-Z]{1,3}(1234567|2345678|3456789|9876543|0000000|1111111)", text):
+        return True
+    if re.fullmatch(r"(123456789|987654321|000000000|111111111)", text):
+        return True
+    return False
 
 
 def _country(nationality, country_name):
