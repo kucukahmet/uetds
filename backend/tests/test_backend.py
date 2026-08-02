@@ -543,6 +543,45 @@ def test_passenger_photo_ocr_service_normalizes_openai_response(monkeypatch, set
     }
 
 
+def test_passenger_photo_ocr_service_normalizes_common_european_nationalities(monkeypatch, settings):
+    settings.OPENAI_API_KEY = "test-key"
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"passengers":['
+                                '{"first_name":"MARÍA","last_name":"ALCARAZ RUIZ","identity_no":"53296757F","nationality":"Spanish","gender":"F"},'
+                                '{"first_name":"RITA","last_name":"GRANGER","identity_no":"CH341393","nationality":"Portuguese","gender":"female"},'
+                                '{"first_name":"PIERRE","last_name":"ARYNS","identity_no":"GC402231","nationality":"Belgian","gender":"M"}'
+                                '],"raw_text":""}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("imports.passenger_photo_ocr.requests.post", lambda *args, **kwargs: FakeResponse())
+    image = SimpleUploadedFile("passengers.jpg", b"fake-image", content_type="image/jpeg")
+
+    result = extract_passengers_from_image(image)
+
+    assert result["passengers"][0]["nationality"] == "ES"
+    assert result["passengers"][0]["country_name"] == "İspanya"
+    assert result["passengers"][0]["gender"] == "K"
+    assert result["passengers"][1]["nationality"] == "PT"
+    assert result["passengers"][1]["country_name"] == "Portekiz"
+    assert result["passengers"][1]["gender"] == "K"
+    assert result["passengers"][2]["nationality"] == "BE"
+    assert result["passengers"][2]["country_name"] == "Belçika"
+    assert result["passengers"][2]["gender"] == "E"
+
+
 def test_sefer_grup_payload_sends_district_code_and_free_text_place(monkeypatch):
     user = make_user()
     company = make_company("UETDS Rota Firma")

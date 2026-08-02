@@ -15,8 +15,7 @@ export type ParsedPassenger = {
 };
 
 export function parsePassengerText(raw: string): ParsedPassenger[] {
-  return raw
-    .split(/\r?\n/)
+  return normalizePassengerRows(raw)
     .map((line) => parsePassengerLine(line))
     .filter((passenger): passenger is ParsedPassenger => Boolean(passenger));
 }
@@ -26,14 +25,28 @@ export function parsePassengerMatrix(rows: unknown[][]): ParsedPassenger[] {
   if (!normalizedRows.length) {
     return [];
   }
-  if (looksLikeHeaderRow(normalizedRows[0])) {
-    const headers = normalizedRows[0].map(normalizeHeader);
+  const headerIndex = normalizedRows.findIndex((row, index) => index < 10 && looksLikeHeaderRow(row));
+  if (headerIndex >= 0) {
+    const headers = normalizedRows[headerIndex].map(normalizeHeader);
     return normalizedRows
-      .slice(1)
+      .slice(headerIndex + 1)
       .map((row) => parsePassengerObjectRow(Object.fromEntries(headers.map((header, index) => [header, row[index] || ""]))))
       .filter((passenger): passenger is ParsedPassenger => Boolean(passenger));
   }
   return normalizedRows.map((row) => parsePassengerArrayRow(row)).filter((passenger): passenger is ParsedPassenger => Boolean(passenger));
+}
+
+function normalizePassengerRows(raw: string) {
+  const rows = raw
+    .replace(/\r/g, "\n")
+    .replace(/\[[^\]]+\]\s*[^:\n]{1,80}:\s*/g, "\n")
+    .replace(/([A-Za-zÇĞİÖŞÜçğıöşü])(\d{1,3}[.)]\s+)/g, "$1\n$2")
+    .replace(/(^|[^\d\n])(\d{1,3}[.)]\s+(?=[A-Za-zÇĞİÖŞÜçğıöşü]))/g, "$1\n$2")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const numberedPassengerRows = rows.filter((line) => /^\d{1,3}[.)]\s+/.test(line));
+  return numberedPassengerRows.length >= 2 ? numberedPassengerRows : rows;
 }
 
 function parsePassengerLine(line: string): ParsedPassenger | null {
@@ -52,10 +65,19 @@ function parsePassengerLine(line: string): ParsedPassenger | null {
   let country: CountryOption | null = null;
   let identity_no = "";
   let phone = "";
+  let sawDate = false;
   const nameTokens: string[] = [];
 
   for (const token of tokens) {
-    const normalized = normalizeToken(token);
+    const cleanedToken = cleanToken(token);
+    if (!cleanedToken || isRowNumberMarker(token)) {
+      continue;
+    }
+    if (isDateLike(cleanedToken)) {
+      sawDate = true;
+      continue;
+    }
+    const normalized = normalizeToken(cleanedToken);
     const matchedCountry = findCountryByNameOrCode(normalized);
     if (matchedCountry) {
       country = matchedCountry;
@@ -69,28 +91,30 @@ function parsePassengerLine(line: string): ParsedPassenger | null {
       gender = "K";
       continue;
     }
-    if (!seat_no && /^\d{1,3}$/.test(token)) {
-      seat_no = token;
+    if (!seat_no && /^\d{1,3}$/.test(cleanedToken)) {
+      seat_no = cleanedToken;
       continue;
     }
-    if (!identity_no && isIdentityLike(token)) {
-      identity_no = token.toUpperCase();
+    if (!identity_no && isIdentityLike(cleanedToken)) {
+      identity_no = normalizeIdentity(cleanedToken);
       continue;
     }
-    if (!phone && identity_no && isPhoneLike(token)) {
-      phone = sanitizePhone(token);
+    if (!phone && identity_no && isPhoneLike(cleanedToken)) {
+      phone = sanitizePhone(cleanedToken);
       continue;
     }
-    nameTokens.push(token);
+    nameTokens.push(cleanNameToken(token));
   }
 
-  if (nameTokens.length < 2) {
+  if (!identity_no || nameTokens.length < 2) {
     return null;
   }
-  const first_name = titleCaseName(nameTokens.slice(0, -1).join(" "));
-  const last_name = titleCaseName(nameTokens[nameTokens.length - 1]);
   const identity_type = identityTypeFor(identity_no);
   const resolvedCountry = country || (identity_type === "tc" ? TURKEY_COUNTRY : null);
+  const { first_name, last_name } = splitPassengerName(nameTokens, {
+    countryCode: resolvedCountry?.code || "",
+    sawDate
+  });
   return {
     first_name,
     last_name,
@@ -105,6 +129,10 @@ function parsePassengerLine(line: string): ParsedPassenger | null {
 }
 
 function parsePassengerArrayRow(row: string[]): ParsedPassenger | null {
+  const manifestPassenger = parseTravelManifestArrayRow(row);
+  if (manifestPassenger) {
+    return manifestPassenger;
+  }
   const [countryCell, firstNameCell, lastNameCell, identityCell, genderCell, phoneCell, seatCell] = row;
   const identity_no = normalizeIdentity(identityCell);
   const identity_type = identityTypeFor(identity_no);
@@ -128,9 +156,9 @@ function parsePassengerArrayRow(row: string[]): ParsedPassenger | null {
 }
 
 function parsePassengerObjectRow(row: Record<string, string>): ParsedPassenger | null {
-  const identity_no = normalizeIdentity(valueFor(row, ["identity", "identityno", "kimlik", "kimlikpasaport", "tckimlik", "pasaport", "passport"]));
-  const first_name = titleCaseName(valueFor(row, ["first", "firstname", "ad", "adi", "adsoyad"]));
-  const last_name = titleCaseName(valueFor(row, ["last", "lastname", "soyad", "soyadi", "surname"]));
+  const identity_no = normalizeIdentity(valueFor(row, ["identity", "identityno", "kimlik", "kimlikpasaport", "tckimlik", "pasaport", "passport", "passportnumber"]));
+  const first_name = titleCaseName(valueFor(row, ["first", "firstname", "name", "ad", "adi", "adsoyad"]));
+  const last_name = titleCaseName(valueFor(row, ["last", "lastname", "surname", "soyad", "soyadi"]));
   if (!first_name || !last_name || !identity_no) {
     return parsePassengerLine(Object.values(row).join(" "));
   }
@@ -146,6 +174,48 @@ function parsePassengerObjectRow(row: Record<string, string>): ParsedPassenger |
     gender: normalizeGender(valueFor(row, ["gender", "cinsiyet"])),
     seat_no: normalizeSeat(valueFor(row, ["seat", "seatno", "koltuk", "koltukno"])),
     phone: sanitizePhone(valueFor(row, ["phone", "telefon", "tel", "gsm"]))
+  };
+}
+
+function parseTravelManifestArrayRow(row: string[]): ParsedPassenger | null {
+  const [indexCell, firstNameCell, lastNameCell, countryCell, identityCell] = row;
+  if (!/^\d{1,3}$/.test(cellToString(indexCell)) || !firstNameCell || !lastNameCell || !identityCell) {
+    return null;
+  }
+  const country = countryFromValue(countryCell);
+  if (!country) {
+    return null;
+  }
+  const identity_no = normalizeIdentity(identityCell);
+  if (!identity_no || !isIdentityLike(identity_no)) {
+    return null;
+  }
+  return {
+    first_name: titleCaseName(firstNameCell),
+    last_name: titleCaseName(lastNameCell),
+    identity_type: identityTypeFor(identity_no),
+    identity_no,
+    nationality: country.code,
+    country_name: country.name,
+    gender: "",
+    seat_no: normalizeSeat(indexCell),
+    phone: ""
+  };
+}
+
+function splitPassengerName(tokens: string[], context: { countryCode: string; sawDate: boolean }) {
+  const cleanTokens = tokens.map(cleanNameToken).filter(Boolean);
+  if (context.countryCode === "ES" && context.sawDate && cleanTokens.length >= 3) {
+    const surnameTokens = cleanTokens.slice(0, 2);
+    const givenNameTokens = cleanTokens.slice(2);
+    return {
+      first_name: titleCaseName(givenNameTokens.join(" ")),
+      last_name: titleCaseName(surnameTokens.join(" "))
+    };
+  }
+  return {
+    first_name: titleCaseName(cleanTokens.slice(0, -1).join(" ")),
+    last_name: titleCaseName(cleanTokens[cleanTokens.length - 1])
   };
 }
 
@@ -224,7 +294,7 @@ function valueFor(row: Record<string, string>, aliases: string[]) {
 
 function looksLikeHeaderRow(row: string[]) {
   const normalized = row.map(normalizeHeader);
-  return normalized.some((item) => ["ad", "adi", "firstname", "kimlik", "tckimlik", "pasaport", "uyruk", "country", "cinsiyet"].includes(item));
+  return normalized.some((item) => ["ad", "adi", "name", "firstname", "kimlik", "tckimlik", "pasaport", "passport", "passportnumber", "uyruk", "country", "nationality", "cinsiyet"].includes(item));
 }
 
 function normalizeHeader(value: string) {
@@ -246,6 +316,22 @@ function normalizeToken(token: string) {
     .toLocaleLowerCase("tr-TR")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function cleanToken(token: string) {
+  return token.replace(/^[()[\]{}]+|[()[\]{}.,:;]+$/g, "").trim();
+}
+
+function cleanNameToken(token: string) {
+  return cleanToken(token).replace(/[^A-Za-zÇĞİÖŞÜçğıöşüÀ-ž' -]/g, "").trim();
+}
+
+function isRowNumberMarker(token: string) {
+  return /^\d{1,3}[.)]$/.test(token.trim());
+}
+
+function isDateLike(token: string) {
+  return /^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$/.test(token);
 }
 
 function titleCaseName(value: string) {

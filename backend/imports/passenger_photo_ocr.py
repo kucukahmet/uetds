@@ -1,6 +1,7 @@
 import base64
 import json
 import re
+import unicodedata
 
 import requests
 from django.conf import settings
@@ -10,6 +11,10 @@ from rest_framework.exceptions import APIException, ValidationError
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 PHOTO_OCR_UNCONFIGURED_MESSAGE = "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak."
 COUNTRY_ALIASES = {
+    "BE": ("BE", "Belçika"),
+    "BELCIKA": ("BE", "Belçika"),
+    "BELGIUM": ("BE", "Belçika"),
+    "BELGIAN": ("BE", "Belçika"),
     "TR": ("TR", "Türkiye"),
     "TURKIYE": ("TR", "Türkiye"),
     "TURKEY": ("TR", "Türkiye"),
@@ -17,9 +22,23 @@ COUNTRY_ALIASES = {
     "UK": ("GB", "İngiltere"),
     "INGILTERE": ("GB", "İngiltere"),
     "ENGLAND": ("GB", "İngiltere"),
+    "BRITISH": ("GB", "İngiltere"),
     "DE": ("DE", "Almanya"),
     "ALMANYA": ("DE", "Almanya"),
     "GERMANY": ("DE", "Almanya"),
+    "ES": ("ES", "İspanya"),
+    "ESPANYA": ("ES", "İspanya"),
+    "ISPANYA": ("ES", "İspanya"),
+    "SPAIN": ("ES", "İspanya"),
+    "SPANISH": ("ES", "İspanya"),
+    "SPANIS": ("ES", "İspanya"),
+    "ESPANOL": ("ES", "İspanya"),
+    "ESPANA": ("ES", "İspanya"),
+    "PT": ("PT", "Portekiz"),
+    "PORTEKIZ": ("PT", "Portekiz"),
+    "PORTUGAL": ("PT", "Portekiz"),
+    "PORTUGUESE": ("PT", "Portekiz"),
+    "PORTUGUES": ("PT", "Portekiz"),
 }
 
 
@@ -81,7 +100,12 @@ def extract_passengers_from_image(image_file):
                                 "\"identity_no\":\"\",\"nationality\":\"TR\",\"country_name\":\"Türkiye\","
                                 "\"gender\":\"E veya K veya boş\",\"seat_no\":\"\",\"phone\":\"\"}],\"raw_text\":\"\"}. "
                                 "T.C. kimlik veya pasaport numarasını identity_no alanına yaz. "
-                                "M/male/erkek gördüğünde gender alanını E yap. F/female/kadın gördüğünde K yap. Telefon yoksa boş bırak."
+                                "M/male/erkek gördüğünde gender alanını E yap. F/female/kadın gördüğünde K yap. Telefon yoksa boş bırak. "
+                                "Spanish/Spain gördüğünde ES/İspanya, Portuguese/Portugal gördüğünde PT/Portekiz, "
+                                "Belgian/Belgium gördüğünde BE/Belçika, UK/British gördüğünde GB/İngiltere kullan. "
+                                "Satır numarasını koltuk sanma; yalnızca açıkça koltuk/seat bilgisi varsa seat_no doldur. "
+                                "Fotoğraf tablo şeklindeyse Name/Surname/Passport/Nationality kolonlarını eşleştir; "
+                                "isimlerdeki aksanları ve çok kelimeli soyadlarını koru."
                             ),
                         },
                         {"type": "image_url", "image_url": {"url": data_url}},
@@ -194,4 +218,5 @@ def _upper_tr(value):
 def _ascii_key(value):
     text = str(value or "").strip().upper()
     translation = str.maketrans({"İ": "I", "I": "I", "Ş": "S", "Ğ": "G", "Ü": "U", "Ö": "O", "Ç": "C"})
-    return re.sub(r"[^A-Z0-9]", "", text.translate(translation))
+    normalized = unicodedata.normalize("NFD", text.translate(translation))
+    return re.sub(r"[^A-Z0-9]", "", normalized)

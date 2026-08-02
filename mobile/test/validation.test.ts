@@ -56,6 +56,9 @@ describe("country helpers", () => {
   it("searches by Turkish name, English alias and code", () => {
     expect(findCountryByNameOrCode("Turkey")).toMatchObject({ code: "TR", name: "Türkiye" });
     expect(findCountryByNameOrCode("GB")).toMatchObject({ code: "GB", name: "İngiltere" });
+    expect(findCountryByNameOrCode("Spanish")).toMatchObject({ code: "ES", name: "İspanya" });
+    expect(findCountryByNameOrCode("Portuguese")).toMatchObject({ code: "PT", name: "Portekiz" });
+    expect(findCountryByNameOrCode("Belgian")).toMatchObject({ code: "BE", name: "Belçika" });
     expect(searchCountries("ing")[0]).toMatchObject({ code: "GB", name: "İngiltere" });
   });
 });
@@ -74,6 +77,34 @@ describe("passenger import", () => {
     });
   });
 
+  it("parses WhatsApp passenger lists with joined rows and birth dates", () => {
+    const passengers = parsePassengerText(
+      "[22:25, 31.07.2026] Çağrı: 1. Ruiz Ordovas María Dolores 14/02/1964 PAL635178 Spanish2.  Alcaraz Ruiz María 29/05/1990 53296757F Spanish\n" +
+        "3.  Ayuso Alcaraz Jan 30/01/2020 54926968R Spanish\n" +
+        "4.  Alcaraz Ruiz Juan 28/06/1996 53865339Y Spanish\n" +
+        "[22:25, 31.07.2026] Çağrı: 01/08 yarın\n48 Z 2272\nÇağrı Akbay 17951639708\nDlm Havalimanı / Marmaris Selimiye\n18:55-23:00"
+    );
+
+    expect(passengers).toHaveLength(4);
+    expect(passengers[0]).toMatchObject({
+      first_name: "María Dolores",
+      last_name: "Ruiz Ordovas",
+      identity_no: "PAL635178",
+      nationality: "ES",
+      country_name: "İspanya"
+    });
+    expect(passengers[1]).toMatchObject({
+      first_name: "María",
+      last_name: "Alcaraz Ruiz",
+      identity_no: "53296757F"
+    });
+    expect(passengers[3]).toMatchObject({
+      first_name: "Juan",
+      last_name: "Alcaraz Ruiz",
+      identity_no: "53865339Y"
+    });
+  });
+
   it("parses headerless UETDS Excel passenger rows", () => {
     expect(parsePassengerMatrix([["TR", "İBRAHİM", "ERKAN", 10481878388, "E", "-"]])[0]).toMatchObject({
       first_name: "İbrahim",
@@ -84,6 +115,31 @@ describe("passenger import", () => {
       country_name: "Türkiye",
       gender: "E",
       phone: ""
+    });
+  });
+
+  it("parses manifest spreadsheets when the header is not the first row", () => {
+    const rows = [
+      ["", "", "", "", ""],
+      ["", "No", "Name", "Surname", "Nationality", "Passport Number", "Date expiry"],
+      ["", "1", "Rita", "Granger", "PT", "CH341393", "13.04.2031"],
+      ["", "2", "Dylan", "Dennison", "UK", "145575135", "12.02.2034"]
+    ];
+
+    const passengers = parsePassengerMatrix(rows);
+    expect(passengers).toHaveLength(2);
+    expect(passengers[0]).toMatchObject({
+      first_name: "Rita",
+      last_name: "Granger",
+      identity_no: "CH341393",
+      nationality: "PT",
+      country_name: "Portekiz"
+    });
+    expect(passengers[1]).toMatchObject({
+      first_name: "Dylan",
+      last_name: "Dennison",
+      nationality: "GB",
+      country_name: "İngiltere"
     });
   });
 
