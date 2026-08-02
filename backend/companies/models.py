@@ -26,6 +26,10 @@ class CompanySettings(TimeStampedUUIDModel):
     live_uetds_enabled = models.BooleanField(default=False)
     default_uetds_environment = models.CharField(max_length=16, default="test")
     session_days = models.PositiveSmallIntegerField(default=7)
+    ai_passenger_parse_enabled = models.BooleanField(default=False)
+    ai_passenger_parse_monthly_token_limit = models.PositiveIntegerField(default=50000)
+    ai_passenger_parse_monthly_tokens_used = models.PositiveIntegerField(default=0)
+    ai_passenger_parse_usage_month = models.CharField(max_length=7, blank=True)
 
 
 class CompanyMembership(TimeStampedUUIDModel):

@@ -4,9 +4,9 @@ import { Platform } from "react-native";
 import { endpoints } from "@/api/endpoints";
 import type { ImportedPassenger } from "@/types/api";
 
-type Source = "library" | "camera";
+export type PassengerPhotoOcrSource = "library" | "camera";
 
-export async function pickPassengerPhotoForOcr(source: Source = "library"): Promise<ImportedPassenger[]> {
+export async function pickPassengerPhotoForOcr(source: PassengerPhotoOcrSource = "library"): Promise<ImportedPassenger[]> {
   const result = source === "camera" ? await pickFromCamera() : await pickFromLibrary();
   if (result.canceled || !result.assets.length) {
     return [];

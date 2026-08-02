@@ -437,10 +437,13 @@ def test_location_references_searches_airports_and_company_saved_locations():
 def test_passenger_photo_ocr_endpoint_returns_parsed_passengers(monkeypatch):
     user = make_user()
     company = make_company("OCR Firma")
+    company.settings.ai_passenger_parse_enabled = True
+    company.settings.save(update_fields=["ai_passenger_parse_enabled"])
     make_membership(user, company)
 
-    def fake_extract(image):
+    def fake_extract(image, company=None):
         assert image.name == "passengers.jpg"
+        assert company.name == "OCR Firma"
         return {
             "passengers": [
                 {
@@ -458,6 +461,7 @@ def test_passenger_photo_ocr_endpoint_returns_parsed_passengers(monkeypatch):
             "raw_text": "TR İBRAHİM ERKAN 10481878388 E",
             "provider": "openai",
             "model": "gpt-4o-mini",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
         }
 
     monkeypatch.setattr("imports.views.extract_passengers_from_image", fake_extract)
@@ -468,6 +472,7 @@ def test_passenger_photo_ocr_endpoint_returns_parsed_passengers(monkeypatch):
     assert response.status_code == 200
     assert response.data["passengers"][0]["first_name"] == "İbrahim"
     assert response.data["passengers"][0]["identity_no"] == "10481878388"
+    assert response.data["usage"]["total_tokens"] == 15
 
 
 def test_passenger_photo_ocr_status_reports_missing_key(settings):
@@ -481,9 +486,15 @@ def test_passenger_photo_ocr_status_reports_missing_key(settings):
     assert response.status_code == 200
     assert response.data == {
         "available": False,
+        "enabled": False,
         "provider": "openai",
         "model": settings.OPENAI_VISION_MODEL,
         "message": "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak.",
+        "token_limit": 50000,
+        "tokens_used": 0,
+        "tokens_remaining": 50000,
+        "limit_reached": False,
+        "usage_month": timezone.localdate().strftime("%Y-%m"),
     }
 
 
@@ -499,6 +510,50 @@ def test_passenger_photo_ocr_endpoint_reports_missing_key_as_unavailable(setting
     assert response.status_code == 503
     assert response.data["message"]["detail"] == "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak."
     assert response.data["error_code"] == "photo_ocr_not_configured"
+
+
+def test_passenger_photo_ocr_endpoint_respects_company_ai_toggle(settings):
+    settings.OPENAI_API_KEY = "test-key"
+    user = make_user()
+    company = make_company("OCR Disabled Firma")
+    make_membership(user, company)
+    image = SimpleUploadedFile("passengers.jpg", b"fake-image", content_type="image/jpeg")
+
+    response = auth_client(user, company).post("/api/v1/imports/passenger-photo-ocr/", {"image": image}, format="multipart")
+
+    assert response.status_code == 403
+    assert response.data["error_code"] == "photo_ocr_disabled"
+    assert response.data["message"]["detail"] == "AI yolcu parse bu firma için kapalı."
+
+
+def test_passenger_photo_ocr_status_reports_company_token_limit(settings):
+    settings.OPENAI_API_KEY = "test-key"
+    user = make_user()
+    company = make_company("OCR Limit Firma")
+    company.settings.ai_passenger_parse_enabled = True
+    company.settings.ai_passenger_parse_monthly_token_limit = 100
+    company.settings.ai_passenger_parse_monthly_tokens_used = 100
+    company.settings.ai_passenger_parse_usage_month = timezone.localdate().strftime("%Y-%m")
+    company.settings.save(
+        update_fields=[
+            "ai_passenger_parse_enabled",
+            "ai_passenger_parse_monthly_token_limit",
+            "ai_passenger_parse_monthly_tokens_used",
+            "ai_passenger_parse_usage_month",
+        ]
+    )
+    make_membership(user, company)
+
+    response = auth_client(user, company).get("/api/v1/imports/passenger-photo-ocr/status/")
+
+    assert response.status_code == 200
+    assert response.data["available"] is False
+    assert response.data["enabled"] is True
+    assert response.data["message"] == "AI yolcu parse token limiti doldu."
+    assert response.data["token_limit"] == 100
+    assert response.data["tokens_used"] == 100
+    assert response.data["tokens_remaining"] == 0
+    assert response.data["limit_reached"] is True
 
 
 def test_passenger_photo_ocr_service_normalizes_openai_response(monkeypatch, settings):
@@ -613,6 +668,64 @@ def test_passenger_photo_ocr_service_blanks_placeholder_identities(monkeypatch, 
     assert result["passengers"][0]["identity_type"] == "unknown"
     assert result["passengers"][1]["identity_no"] == "53296757F"
     assert result["passengers"][1]["identity_type"] == "passport"
+
+
+def test_passenger_photo_ocr_service_records_company_token_usage(monkeypatch, settings):
+    settings.OPENAI_API_KEY = "test-key"
+    user = make_user()
+    company = make_company("OCR Usage Firma")
+    company.settings.ai_passenger_parse_enabled = True
+    company.settings.ai_passenger_parse_monthly_token_limit = 200
+    company.settings.save(update_fields=["ai_passenger_parse_enabled", "ai_passenger_parse_monthly_token_limit"])
+    make_membership(user, company)
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "usage": {"prompt_tokens": 30, "completion_tokens": 12, "total_tokens": 42},
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"passengers":[{"first_name":"RITA","last_name":"GRANGER","identity_no":"CH341393","nationality":"PT"}],"raw_text":""}'
+                        }
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("imports.passenger_photo_ocr.requests.post", lambda *args, **kwargs: FakeResponse())
+    image = SimpleUploadedFile("passengers.jpg", b"fake-image", content_type="image/jpeg")
+
+    result = extract_passengers_from_image(image, company=company)
+
+    company.settings.refresh_from_db()
+    assert result["usage"]["total_tokens"] == 42
+    assert company.settings.ai_passenger_parse_monthly_tokens_used == 42
+    assert company.settings.ai_passenger_parse_usage_month == timezone.localdate().strftime("%Y-%m")
+
+
+def test_passenger_photo_ocr_service_blocks_when_company_token_limit_is_reached(settings):
+    settings.OPENAI_API_KEY = "test-key"
+    company = make_company("OCR Reached Firma")
+    company.settings.ai_passenger_parse_enabled = True
+    company.settings.ai_passenger_parse_monthly_token_limit = 10
+    company.settings.ai_passenger_parse_monthly_tokens_used = 10
+    company.settings.ai_passenger_parse_usage_month = timezone.localdate().strftime("%Y-%m")
+    company.settings.save(
+        update_fields=[
+            "ai_passenger_parse_enabled",
+            "ai_passenger_parse_monthly_token_limit",
+            "ai_passenger_parse_monthly_tokens_used",
+            "ai_passenger_parse_usage_month",
+        ]
+    )
+    image = SimpleUploadedFile("passengers.jpg", b"fake-image", content_type="image/jpeg")
+
+    with pytest.raises(Exception) as exc:
+        extract_passengers_from_image(image, company=company)
+
+    assert getattr(exc.value, "default_code", "") == "photo_ocr_limit_exceeded"
 
 
 def test_sefer_grup_payload_sends_district_code_and_free_text_place(monkeypatch):

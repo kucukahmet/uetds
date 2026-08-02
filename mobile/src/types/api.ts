@@ -9,6 +9,10 @@ export type CompanySettings = {
   live_uetds_enabled: boolean;
   default_uetds_environment: "test" | "live";
   session_days: number;
+  ai_passenger_parse_enabled: boolean;
+  ai_passenger_parse_monthly_token_limit: number;
+  ai_passenger_parse_monthly_tokens_used: number;
+  ai_passenger_parse_usage_month: string;
 };
 
 export type Company = {
@@ -61,13 +65,24 @@ export type PassengerPhotoOcrResponse = {
   raw_text: string;
   provider: string;
   model: string;
+  usage: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 };
 
 export type PassengerPhotoOcrStatus = {
   available: boolean;
+  enabled: boolean;
   provider: string;
   model: string;
   message: string;
+  token_limit: number;
+  tokens_used: number;
+  tokens_remaining: number | null;
+  limit_reached: boolean;
+  usage_month: string;
 };
 
 export type Vehicle = {

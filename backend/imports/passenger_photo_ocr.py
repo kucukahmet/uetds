@@ -5,7 +5,11 @@ import unicodedata
 
 import requests
 from django.conf import settings
+from django.db.models import F
+from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
+
+from companies.models import CompanySettings
 
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -48,19 +52,53 @@ class PhotoOcrNotConfigured(APIException):
     default_code = "photo_ocr_not_configured"
 
 
-def get_passenger_photo_ocr_status():
+class PhotoOcrDisabled(APIException):
+    status_code = 403
+    default_detail = "AI yolcu parse bu firma için kapalı."
+    default_code = "photo_ocr_disabled"
+
+
+class PhotoOcrLimitExceeded(APIException):
+    status_code = 429
+    default_detail = "AI yolcu parse token limiti doldu."
+    default_code = "photo_ocr_limit_exceeded"
+
+
+def get_passenger_photo_ocr_status(company=None):
     configured = bool(settings.OPENAI_API_KEY)
+    company_settings = _company_ai_settings(company) if company else None
+    enabled = company_settings.ai_passenger_parse_enabled if company_settings else True
+    token_limit = company_settings.ai_passenger_parse_monthly_token_limit if company_settings else 0
+    tokens_used = company_settings.ai_passenger_parse_monthly_tokens_used if company_settings else 0
+    tokens_remaining = max(token_limit - tokens_used, 0) if token_limit else None
+    limit_reached = bool(token_limit and tokens_used >= token_limit)
+    available = configured and enabled and not limit_reached
+    message = "Foto/OCR hazır."
+    if not configured:
+        message = PHOTO_OCR_UNCONFIGURED_MESSAGE
+    elif not enabled:
+        message = PhotoOcrDisabled.default_detail
+    elif limit_reached:
+        message = PhotoOcrLimitExceeded.default_detail
     return {
-        "available": configured,
+        "available": available,
+        "enabled": enabled,
         "provider": "openai",
         "model": settings.OPENAI_VISION_MODEL,
-        "message": "Foto/OCR hazır." if configured else PHOTO_OCR_UNCONFIGURED_MESSAGE,
+        "message": message,
+        "token_limit": token_limit,
+        "tokens_used": tokens_used,
+        "tokens_remaining": tokens_remaining,
+        "limit_reached": limit_reached,
+        "usage_month": company_settings.ai_passenger_parse_usage_month if company_settings else "",
     }
 
 
-def extract_passengers_from_image(image_file):
+def extract_passengers_from_image(image_file, company=None):
     if not settings.OPENAI_API_KEY:
         raise PhotoOcrNotConfigured()
+    if company:
+        _assert_company_ai_parse_available(company)
 
     content_type = image_file.content_type or "image/jpeg"
     if not content_type.startswith("image/"):
@@ -124,11 +162,61 @@ def extract_passengers_from_image(image_file):
         raise ValidationError({"ocr": _openai_error_message(response)})
 
     payload = response.json()
+    usage = _normalize_usage(payload.get("usage"))
+    if company and usage["total_tokens"]:
+        _record_company_ai_usage(company, usage["total_tokens"])
     content = payload["choices"][0]["message"]["content"]
     parsed = _loads_json_object(content)
     passengers = [_normalize_passenger(item) for item in parsed.get("passengers", [])]
     passengers = [item for item in passengers if item["first_name"] or item["last_name"] or item["identity_no"]]
-    return {"passengers": passengers, "raw_text": str(parsed.get("raw_text") or ""), "provider": "openai", "model": settings.OPENAI_VISION_MODEL}
+    return {
+        "passengers": passengers,
+        "raw_text": str(parsed.get("raw_text") or ""),
+        "provider": "openai",
+        "model": settings.OPENAI_VISION_MODEL,
+        "usage": usage,
+    }
+
+
+def _assert_company_ai_parse_available(company):
+    company_settings = _company_ai_settings(company)
+    if not company_settings.ai_passenger_parse_enabled:
+        raise PhotoOcrDisabled()
+    if (
+        company_settings.ai_passenger_parse_monthly_token_limit
+        and company_settings.ai_passenger_parse_monthly_tokens_used >= company_settings.ai_passenger_parse_monthly_token_limit
+    ):
+        raise PhotoOcrLimitExceeded()
+
+
+def _company_ai_settings(company):
+    company_settings, _ = CompanySettings.objects.get_or_create(company=company)
+    current_month = _usage_month()
+    if company_settings.ai_passenger_parse_usage_month != current_month:
+        company_settings.ai_passenger_parse_usage_month = current_month
+        company_settings.ai_passenger_parse_monthly_tokens_used = 0
+        company_settings.save(update_fields=["ai_passenger_parse_usage_month", "ai_passenger_parse_monthly_tokens_used", "updated_at"])
+    return company_settings
+
+
+def _record_company_ai_usage(company, total_tokens):
+    CompanySettings.objects.filter(company=company).update(
+        ai_passenger_parse_usage_month=_usage_month(),
+        ai_passenger_parse_monthly_tokens_used=F("ai_passenger_parse_monthly_tokens_used") + total_tokens,
+    )
+
+
+def _usage_month():
+    return timezone.localdate().strftime("%Y-%m")
+
+
+def _normalize_usage(value):
+    value = value or {}
+    return {
+        "prompt_tokens": int(value.get("prompt_tokens") or 0),
+        "completion_tokens": int(value.get("completion_tokens") or 0),
+        "total_tokens": int(value.get("total_tokens") or 0),
+    }
 
 
 def _normalize_passenger(item):

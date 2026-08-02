@@ -27,11 +27,11 @@ class ImportBatchViewSet(TenantModelViewSet):
         image = request.FILES.get("image")
         if not image:
             raise ValidationError({"image": "Fotoğraf zorunlu."})
-        result = extract_passengers_from_image(image)
+        result = extract_passengers_from_image(image, company=company)
         return Response(result)
 
     @action(detail=False, methods=["get"], url_path="passenger-photo-ocr/status")
     def passenger_photo_ocr_status(self, request):
         company = self.get_company()
         self.check_company_permission(company, "trip:create")
-        return Response(get_passenger_photo_ocr_status())
+        return Response(get_passenger_photo_ocr_status(company))

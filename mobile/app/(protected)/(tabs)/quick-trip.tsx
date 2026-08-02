@@ -20,12 +20,12 @@ import { getFeedbackMessage } from "@/lib/errors";
 import { normalizePlate } from "@/lib/format";
 import { genderOptions } from "@/lib/options";
 import { pickPassengerExcel } from "@/lib/passengerExcel";
-import { pickPassengerPhotoForOcr } from "@/lib/passengerPhotoOcr";
+import { pickPassengerPhotoForOcr, type PassengerPhotoOcrSource } from "@/lib/passengerPhotoOcr";
 import { parsePassengerText } from "@/lib/passengerImport";
 import { sanitizePassengerIdentity } from "@/lib/passengerValidation";
 import { quickTripSchema } from "@/lib/validation";
 import { colors, radius, spacing } from "@/theme/tokens";
-import type { LocationReference, Passenger, Personnel, QuickCreatePayload, SavedRoute, Vehicle } from "@/types/api";
+import type { LocationReference, Passenger, PassengerPhotoOcrStatus, Personnel, QuickCreatePayload, SavedRoute, Vehicle } from "@/types/api";
 
 type IdentityType = Passenger["identity_type"];
 
@@ -294,21 +294,23 @@ export default function QuickTripScreen() {
     }
   };
 
-  const addPhotoPassengers = async () => {
+  const addPhotoPassengers = async (source: PassengerPhotoOcrSource) => {
     const ready = await isPhotoOcrReady();
     if (!ready) {
       return;
     }
     try {
       setIsPhotoImporting(true);
-      const parsed = await pickPassengerPhotoForOcr();
+      const parsed = await pickPassengerPhotoForOcr(source);
       if (!parsed.length) {
         Alert.alert("Yolcu bulunamadı", "Fotoğraftan yolcu satırı okunamadı. Daha net bir fotoğrafla tekrar deneyin.");
         return;
       }
       appendParsedPassengers(parsed);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
     } catch (error) {
       Alert.alert("Foto/OCR başarısız", error instanceof Error ? error.message : "Fotoğrafı kontrol edip tekrar deneyin.");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
     } finally {
       setIsPhotoImporting(false);
     }
@@ -425,8 +427,9 @@ export default function QuickTripScreen() {
           addPassenger={() => setState((current) => ({ ...current, passengers: [...current.passengers, newPassenger()] }))}
           addParsedPassengers={addParsedPassengers}
           addExcelPassengers={() => void addExcelPassengers()}
-          addPhotoPassengers={() => void addPhotoPassengers()}
+          addPhotoPassengers={(source) => void addPhotoPassengers(source)}
           isPhotoImporting={isPhotoImporting}
+          photoOcrStatus={photoOcrStatus.data}
           photoOcrUnavailableMessage={photoOcrStatus.data?.available === false ? photoOcrStatus.data.message : ""}
         />
       ) : (
@@ -714,6 +717,7 @@ function PassengerStep({
   addExcelPassengers,
   addPhotoPassengers,
   isPhotoImporting,
+  photoOcrStatus,
   photoOcrUnavailableMessage
 }: {
   state: WizardState;
@@ -723,10 +727,14 @@ function PassengerStep({
   addPassenger: () => void;
   addParsedPassengers: () => void;
   addExcelPassengers: () => void;
-  addPhotoPassengers: () => void;
+  addPhotoPassengers: (source: PassengerPhotoOcrSource) => void;
   isPhotoImporting: boolean;
+  photoOcrStatus?: PassengerPhotoOcrStatus;
   photoOcrUnavailableMessage: string;
 }) {
+  const photoImportDisabled = Boolean(photoOcrStatus && !photoOcrStatus.available);
+  const tokenStatus = formatPhotoOcrTokenStatus(photoOcrStatus);
+
   return (
     <>
       <Card>
@@ -734,7 +742,22 @@ function PassengerStep({
           <AppText variant="titleLg">Yolcu Girişi</AppText>
           <View style={styles.inlineActions}>
             <Button label="Excel" icon="document-text" variant="ghost" onPress={addExcelPassengers} />
-            <Button label="Foto/OCR" icon="camera" variant="ghost" loading={isPhotoImporting} onPress={addPhotoPassengers} />
+            <Button
+              label="Galeri"
+              icon="images"
+              variant="ghost"
+              loading={isPhotoImporting}
+              disabled={photoImportDisabled}
+              onPress={() => addPhotoPassengers("library")}
+            />
+            <Button
+              label="Kamera"
+              icon="camera"
+              variant="ghost"
+              loading={isPhotoImporting}
+              disabled={photoImportDisabled}
+              onPress={() => addPhotoPassengers("camera")}
+            />
           </View>
         </View>
         {photoOcrUnavailableMessage ? (
@@ -743,6 +766,11 @@ function PassengerStep({
               {photoOcrUnavailableMessage}
             </AppText>
           </View>
+        ) : null}
+        {tokenStatus ? (
+          <AppText variant="labelMd" color={colors.textSubtle}>
+            {tokenStatus}
+          </AppText>
         ) : null}
         <Field
           label="Kopyala Yapıştır"
@@ -765,6 +793,20 @@ function PassengerStep({
       <Button label="Yolcu Ekle" icon="add-circle" variant="ghost" onPress={addPassenger} />
     </>
   );
+}
+
+function formatPhotoOcrTokenStatus(status?: PassengerPhotoOcrStatus) {
+  if (!status) {
+    return "";
+  }
+  if (!status.token_limit) {
+    return `AI kullanım: ${formatTokenCount(status.tokens_used)} token / limitsiz`;
+  }
+  return `AI kullanım: ${formatTokenCount(status.tokens_used)} / ${formatTokenCount(status.token_limit)} token`;
+}
+
+function formatTokenCount(value: number) {
+  return value.toLocaleString("tr-TR");
 }
 
 function PassengerCard({
@@ -1394,6 +1436,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     alignItems: "center",
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-between",
     gap: spacing.sm
   },
