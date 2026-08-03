@@ -95,6 +95,35 @@ def test_company_settings_can_update_default_uetds_environment(settings):
     assert company.settings.live_uetds_enabled is True
 
 
+def test_company_settings_does_not_allow_user_managed_ai_quota_fields(settings):
+    settings.UETDS_ALLOWED_ENVIRONMENTS = ("test", "live")
+    user = make_user()
+    company = make_company()
+    make_membership(user, company)
+
+    response = auth_client(user, company).patch(
+        f"/api/v1/companies/{company.id}/settings/",
+        {
+            "ai_passenger_parse_enabled": True,
+            "ai_passenger_parse_monthly_token_limit": 999999,
+            "ai_passenger_parse_monthly_tokens_used": 999999,
+            "ai_passenger_parse_usage_month": "2099-01",
+        },
+        format="json",
+    )
+
+    company.settings.refresh_from_db()
+    assert response.status_code == 200
+    assert response.data["ai_passenger_parse_enabled"] is False
+    assert response.data["ai_passenger_parse_monthly_token_limit"] == 50000
+    assert response.data["ai_passenger_parse_monthly_tokens_used"] == 0
+    assert response.data["ai_passenger_parse_usage_month"] == ""
+    assert company.settings.ai_passenger_parse_enabled is False
+    assert company.settings.ai_passenger_parse_monthly_token_limit == 50000
+    assert company.settings.ai_passenger_parse_monthly_tokens_used == 0
+    assert company.settings.ai_passenger_parse_usage_month == ""
+
+
 def test_vehicle_list_is_tenant_scoped():
     user = make_user()
     company_a = make_company("Firma A")

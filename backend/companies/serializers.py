@@ -16,18 +16,18 @@ class CompanySettingsSerializer(serializers.ModelSerializer):
             "ai_passenger_parse_monthly_tokens_used",
             "ai_passenger_parse_usage_month",
         ]
-        read_only_fields = ["session_days", "ai_passenger_parse_monthly_tokens_used", "ai_passenger_parse_usage_month"]
+        read_only_fields = [
+            "session_days",
+            "ai_passenger_parse_enabled",
+            "ai_passenger_parse_monthly_token_limit",
+            "ai_passenger_parse_monthly_tokens_used",
+            "ai_passenger_parse_usage_month",
+        ]
 
     def validate_default_uetds_environment(self, value):
         if value not in settings.UETDS_ALLOWED_ENVIRONMENTS:
             raise serializers.ValidationError("Bu UETDS ortamı backend kurulumunda açık değil.")
         return value
-
-    def validate_ai_passenger_parse_monthly_token_limit(self, value):
-        if value > 10_000_000:
-            raise serializers.ValidationError("Aylık token limiti 10.000.000 değerinden büyük olamaz.")
-        return value
-
 
 class CompanySerializer(serializers.ModelSerializer):
     settings = CompanySettingsSerializer(read_only=True)

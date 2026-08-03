@@ -24,6 +24,7 @@ import type {
 } from "@/types/api";
 
 export type UetdsEnvironment = "test" | "live";
+type CompanySettingsUpdate = Partial<Pick<CompanySettings, "default_uetds_environment" | "live_uetds_enabled">>;
 type UetdsCheckResponse = {
   valid: boolean;
   environment: UetdsEnvironment;
@@ -35,7 +36,7 @@ export const endpoints = {
   me: () => apiRequest<User>("/me"),
   companies: () => apiRequest<Paginated<Company>>("/companies/", { skipCompany: true }),
   switchCompany: (id: string) => apiRequest(`/companies/${id}/switch/`, { method: "POST", skipCompany: true }),
-  updateCompanySettings: (companyId: string, data: Partial<CompanySettings>) =>
+  updateCompanySettings: (companyId: string, data: CompanySettingsUpdate) =>
     apiRequest<CompanySettings>(`/companies/${companyId}/settings/`, { method: "PATCH", skipCompany: true, body: JSON.stringify(data) }),
 
   vehicles: (query = "") => apiRequest<Paginated<Vehicle>>(`/vehicles/${formatListQuery(query)}`),
