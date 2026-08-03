@@ -151,7 +151,7 @@ def extract_passengers_from_image(image_file, company=None):
                                 "Denden işareti gördüğün hücreleri boş bırakma; simgeyi yazamadığın durumlarda da önceki aynı kolon değerini kullan. "
                                 "Denden işaretini asla adın parçası veya soyadın kendisi olarak yazma. "
                                 "Örneğin üst satır soyadı Tufan ise ve sonraki satırda ad hücresi 'Ömer Can', soyad hücresi denden ise "
-                                "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma. "
+                                "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma ve Tufan'ı Yufan gibi varyantlama. "
                                 "Örnek veya tahmini pasaport üretme; GA1234567, AB1234567, 123456789 gibi "
                                 "placeholder görünümlü değerleri asla yazma. Okuyamıyorsan identity_no alanını boş bırak."
                             ),
@@ -251,7 +251,12 @@ def _normalize_passenger(item, previous_last_name="", previous_country=("", ""))
         nationality, country_name = previous_country
     else:
         nationality, country_name = _country(raw_nationality, raw_country_name)
-    last_name = previous_last_name if _should_carry_previous_value(raw_last_name, previous_last_name=previous_last_name) else _title_name(raw_last_name)
+    if _should_carry_previous_value(raw_last_name, previous_last_name=previous_last_name):
+        last_name = previous_last_name
+    else:
+        last_name = _title_name(raw_last_name)
+        if _is_likely_repeated_surname_ocr_variant(last_name, previous_last_name):
+            last_name = previous_last_name
     return {
         "first_name": _title_name(item.get("first_name", "")),
         "last_name": last_name,
@@ -320,6 +325,17 @@ def _should_carry_previous_value(*values, previous_last_name="", previous_countr
         return False
     texts = [str(value or "").strip() for value in values]
     return all(not text for text in texts) or any(_is_ditto(text) for text in texts)
+
+
+def _is_likely_repeated_surname_ocr_variant(value, previous_last_name):
+    current_key = _ascii_key(value)
+    previous_key = _ascii_key(previous_last_name)
+    return (
+        len(current_key) >= 4
+        and len(current_key) == len(previous_key)
+        and current_key[1:] == previous_key[1:]
+        and current_key[:1] != previous_key[:1]
+    )
 
 
 def _country(nationality, country_name):
