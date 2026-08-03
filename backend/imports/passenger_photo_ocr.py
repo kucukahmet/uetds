@@ -146,10 +146,11 @@ def extract_passengers_from_image(image_file, company=None):
                                 "Fotoğraf tablo şeklindeyse Name/Surname/Passport/Nationality kolonlarını eşleştir; "
                                 "isimlerdeki aksanları ve çok kelimeli soyadlarını koru. "
                                 "El yazısı listelerde adlar solda, soyadlar yan kolonda, kimlik/pasaport sağ kolonda olabilir. "
-                                "Soyad veya ülke hücresinde denden/ditto işareti (\", '', ”, 〃, //, 11, ll, ,,), idem, aynı anlamına gelen "
-                                "tekrar işareti varsa bir üst okunabilir satırdaki aynı kolon değerini kullan. "
+                                "Denden/ditto işareti (\", '', ”, 〃, //, 11, ll, ,,), idem, aynı anlamına gelen tekrar işareti "
+                                "hangi kolondaysa bir üst okunabilir satırdaki aynı kolon değerini kullan. "
                                 "Denden işareti gördüğün hücreleri boş bırakma; simgeyi yazamadığın durumlarda da önceki aynı kolon değerini kullan. "
-                                "Denden işaretini asla adın parçası veya soyadın kendisi olarak yazma. "
+                                "Denden işaretini asla adın, soyadın veya başka bir değerin parçası olarak yazma. "
+                                "Kimlik/pasaport numarası alanında denden görürsen önceki kimliği kopyalama; identity_no alanını boş bırak. "
                                 "Örneğin üst satır soyadı Tufan ise ve sonraki satırda ad hücresi 'Ömer Can', soyad hücresi denden ise "
                                 "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma ve Tufan'ı Yufan/Wafon gibi varyantlama. "
                                 "Örnek veya tahmini pasaport üretme; GA1234567, AB1234567, 123456789 gibi "
@@ -228,45 +229,54 @@ def _normalize_usage(value):
 
 def _normalize_passengers(items):
     passengers = []
-    previous_last_name = ""
-    previous_country = ("", "")
+    previous_values = {
+        "first_name": "",
+        "last_name": "",
+        "nationality": "",
+        "country_name": "",
+        "gender": "",
+        "phone": "",
+    }
     for item in items:
-        passenger = _normalize_passenger(item, previous_last_name=previous_last_name, previous_country=previous_country)
-        if passenger["last_name"]:
-            previous_last_name = passenger["last_name"]
-        if passenger["nationality"] and passenger["country_name"]:
-            previous_country = (passenger["nationality"], passenger["country_name"])
+        passenger = _normalize_passenger(item, previous_values=previous_values)
+        for key in previous_values:
+            if passenger[key]:
+                previous_values[key] = passenger[key]
         passengers.append(passenger)
     return passengers
 
 
-def _normalize_passenger(item, previous_last_name="", previous_country=("", "")):
-    identity_no = _clean_identity(item.get("identity_no", ""))
+def _normalize_passenger(item, previous_values=None):
+    previous_values = previous_values or {}
+    raw_identity_no = item.get("identity_no", "")
+    identity_no = "" if _is_ditto(raw_identity_no) else _clean_identity(raw_identity_no)
     if _looks_like_placeholder_identity(identity_no):
         identity_no = ""
+    first_name = _carry_text_value(item.get("first_name", ""), previous_values.get("first_name", ""), _title_name)
     raw_last_name = item.get("last_name", "")
     raw_nationality = item.get("nationality", "")
     raw_country_name = item.get("country_name", "")
-    if _should_carry_previous_value(raw_nationality, raw_country_name, previous_country=previous_country):
+    previous_country = (previous_values.get("nationality", ""), previous_values.get("country_name", ""))
+    if _should_carry_previous_value(raw_nationality, raw_country_name, previous_value=previous_country, carry_blank=True):
         nationality, country_name = previous_country
     else:
         nationality, country_name = _country(raw_nationality, raw_country_name)
-    if _should_carry_previous_value(raw_last_name, previous_last_name=previous_last_name):
-        last_name = previous_last_name
+    if _should_carry_previous_value(raw_last_name, previous_value=previous_values.get("last_name", ""), carry_blank=True):
+        last_name = previous_values.get("last_name", "")
     else:
         last_name = _title_name(raw_last_name)
-        if _is_likely_repeated_surname_ocr_variant(last_name, previous_last_name):
-            last_name = previous_last_name
+        if _is_likely_repeated_surname_ocr_variant(last_name, previous_values.get("last_name", "")):
+            last_name = previous_values.get("last_name", "")
     return {
-        "first_name": _title_name(item.get("first_name", "")),
+        "first_name": first_name,
         "last_name": last_name,
         "identity_type": "tc" if re.fullmatch(r"\d{11}", identity_no) else "passport" if identity_no else "unknown",
         "identity_no": identity_no,
         "nationality": nationality,
         "country_name": country_name,
-        "gender": _gender(item.get("gender", "")),
+        "gender": _carry_text_value(item.get("gender", ""), previous_values.get("gender", ""), _gender),
         "seat_no": _digits(item.get("seat_no", ""), max_length=3),
-        "phone": _phone(item.get("phone", "")),
+        "phone": _carry_text_value(item.get("phone", ""), previous_values.get("phone", ""), _phone),
     }
 
 
@@ -314,22 +324,30 @@ def _is_ditto(value):
         return False
     key = _ascii_key(text)
     return bool(
-        key in {"DITTO", "IDEM", "AYNI", "DENDEN", "TEKRAR", "YUFAN", "WAFON"}
+        key in {"DITTO", "IDEM", "AYNI", "DENDEN", "TEKRAR"}
         or re.fullmatch(r'["“”\'`´,]{1,4}|〃|/{1,4}|\\{1,4}|[|lIı1]{2,4}', text)
     )
 
 
-def _should_carry_previous_value(*values, previous_last_name="", previous_country=("", "")):
-    has_previous = bool(previous_last_name or any(previous_country))
+def _should_carry_previous_value(*values, previous_value="", carry_blank=False):
+    has_previous = bool(any(previous_value) if isinstance(previous_value, tuple) else previous_value)
     if not has_previous:
         return False
     texts = [str(value or "").strip() for value in values]
-    return all(not text for text in texts) or any(_is_ditto(text) for text in texts)
+    return (carry_blank and all(not text for text in texts)) or any(_is_ditto(text) for text in texts)
+
+
+def _carry_text_value(raw_value, previous_value, normalizer):
+    if _should_carry_previous_value(raw_value, previous_value=previous_value):
+        return previous_value
+    return normalizer(raw_value)
 
 
 def _is_likely_repeated_surname_ocr_variant(value, previous_last_name):
     current_key = _ascii_key(value)
     previous_key = _ascii_key(previous_last_name)
+    if previous_key == "TUFAN" and current_key in {"YUFAN", "WAFON"}:
+        return True
     return (
         len(current_key) >= 4
         and len(current_key) == len(previous_key)

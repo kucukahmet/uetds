@@ -670,7 +670,7 @@ def test_passenger_photo_ocr_service_blanks_placeholder_identities(monkeypatch, 
     assert result["passengers"][1]["identity_type"] == "passport"
 
 
-def test_passenger_photo_ocr_service_fills_ditto_surname_from_previous_row(monkeypatch, settings):
+def test_passenger_photo_ocr_service_fills_ditto_values_from_previous_row(monkeypatch, settings):
     settings.OPENAI_API_KEY = "test-key"
 
     class FakeResponse:
@@ -683,10 +683,11 @@ def test_passenger_photo_ocr_service_fills_ditto_surname_from_previous_row(monke
                         "message": {
                             "content": (
                                 '{"passengers":['
-                                '{"first_name":"PERRHAN","last_name":"TUFAN","identity_no":"T.C.11478875038","nationality":"TR"},'
+                                '{"first_name":"PERRHAN","last_name":"TUFAN","identity_no":"T.C.11478875038","nationality":"TR","gender":"K","phone":"905551111111"},'
                                 '{"first_name":"ÖMER CAN","last_name":"","identity_no":"T.C.11467828768","nationality":""},'
                                 '{"first_name":"YAREN","last_name":"11","identity_no":"T.C.11059884890","nationality":"11"},'
-                                '{"first_name":"SİBEL","last_name":"WAFON","identity_no":"T.C.11687218476","nationality":"TR"}'
+                                '{"first_name":"SİBEL","last_name":"WAFON","identity_no":"T.C.11687218476","nationality":"TR"},'
+                                '{"first_name":"11","last_name":"KAYA","identity_no":"11","nationality":"11","country_name":"11","gender":"11","phone":"11"}'
                                 '],"raw_text":""}'
                             )
                         }
@@ -707,6 +708,14 @@ def test_passenger_photo_ocr_service_fills_ditto_surname_from_previous_row(monke
     assert result["passengers"][1]["country_name"] == "Türkiye"
     assert result["passengers"][2]["last_name"] == "Tufan"
     assert result["passengers"][3]["last_name"] == "Tufan"
+    assert result["passengers"][4]["first_name"] == "Sibel"
+    assert result["passengers"][4]["last_name"] == "Kaya"
+    assert result["passengers"][4]["identity_no"] == ""
+    assert result["passengers"][4]["identity_type"] == "unknown"
+    assert result["passengers"][4]["nationality"] == "TR"
+    assert result["passengers"][4]["country_name"] == "Türkiye"
+    assert result["passengers"][4]["gender"] == "K"
+    assert result["passengers"][4]["phone"] == "905551111111"
 
 
 def test_passenger_photo_ocr_service_records_company_token_usage(monkeypatch, settings):
