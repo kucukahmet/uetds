@@ -145,6 +145,8 @@ def extract_passengers_from_image(image_file, company=None):
                                 "Satır numarasını koltuk sanma; yalnızca açıkça koltuk/seat bilgisi varsa seat_no doldur. "
                                 "Fotoğraf tablo şeklindeyse Name/Surname/Passport/Nationality kolonlarını eşleştir; "
                                 "isimlerdeki aksanları ve çok kelimeli soyadlarını koru. "
+                                "Soyad veya ülke hücresinde denden/ditto işareti (\", ''), idem, aynı anlamına gelen "
+                                "tekrar işareti varsa bir üst okunabilir satırdaki aynı kolon değerini kullan. "
                                 "Örnek veya tahmini pasaport üretme; GA1234567, AB1234567, 123456789 gibi "
                                 "placeholder görünümlü değerleri asla yazma. Okuyamıyorsan identity_no alanını boş bırak."
                             ),
