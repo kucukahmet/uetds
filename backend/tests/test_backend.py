@@ -670,6 +670,39 @@ def test_passenger_photo_ocr_service_blanks_placeholder_identities(monkeypatch, 
     assert result["passengers"][1]["identity_type"] == "passport"
 
 
+def test_passenger_photo_ocr_service_fills_ditto_surname_from_previous_row(monkeypatch, settings):
+    settings.OPENAI_API_KEY = "test-key"
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"passengers":['
+                                '{"first_name":"PERRHAN","last_name":"TUFAN","identity_no":"1114789745038","nationality":"TR"},'
+                                '{"first_name":"ÖMER CAN","last_name":"11","identity_no":"1114678748768","nationality":"11"}'
+                                '],"raw_text":""}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    monkeypatch.setattr("imports.passenger_photo_ocr.requests.post", lambda *args, **kwargs: FakeResponse())
+    image = SimpleUploadedFile("passengers.jpg", b"fake-image", content_type="image/jpeg")
+
+    result = extract_passengers_from_image(image)
+
+    assert result["passengers"][1]["first_name"] == "Ömer Can"
+    assert result["passengers"][1]["last_name"] == "Tufan"
+    assert result["passengers"][1]["nationality"] == "TR"
+    assert result["passengers"][1]["country_name"] == "Türkiye"
+
+
 def test_passenger_photo_ocr_service_records_company_token_usage(monkeypatch, settings):
     settings.OPENAI_API_KEY = "test-key"
     user = make_user()

@@ -145,8 +145,12 @@ def extract_passengers_from_image(image_file, company=None):
                                 "Satır numarasını koltuk sanma; yalnızca açıkça koltuk/seat bilgisi varsa seat_no doldur. "
                                 "Fotoğraf tablo şeklindeyse Name/Surname/Passport/Nationality kolonlarını eşleştir; "
                                 "isimlerdeki aksanları ve çok kelimeli soyadlarını koru. "
-                                "Soyad veya ülke hücresinde denden/ditto işareti (\", ''), idem, aynı anlamına gelen "
+                                "El yazısı listelerde adlar solda, soyadlar yan kolonda, kimlik/pasaport sağ kolonda olabilir. "
+                                "Soyad veya ülke hücresinde denden/ditto işareti (\", '', ”, 〃, //, 11, ll, ,,), idem, aynı anlamına gelen "
                                 "tekrar işareti varsa bir üst okunabilir satırdaki aynı kolon değerini kullan. "
+                                "Denden işaretini asla adın parçası veya soyadın kendisi olarak yazma. "
+                                "Örneğin üst satır soyadı Tufan ise ve sonraki satırda ad hücresi 'Ömer Can', soyad hücresi denden ise "
+                                "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma. "
                                 "Örnek veya tahmini pasaport üretme; GA1234567, AB1234567, 123456789 gibi "
                                 "placeholder görünümlü değerleri asla yazma. Okuyamıyorsan identity_no alanını boş bırak."
                             ),
@@ -169,7 +173,7 @@ def extract_passengers_from_image(image_file, company=None):
         _record_company_ai_usage(company, usage["total_tokens"])
     content = payload["choices"][0]["message"]["content"]
     parsed = _loads_json_object(content)
-    passengers = [_normalize_passenger(item) for item in parsed.get("passengers", [])]
+    passengers = _normalize_passengers(parsed.get("passengers", []))
     passengers = [item for item in passengers if item["first_name"] or item["last_name"] or item["identity_no"]]
     return {
         "passengers": passengers,
@@ -221,14 +225,35 @@ def _normalize_usage(value):
     }
 
 
-def _normalize_passenger(item):
+def _normalize_passengers(items):
+    passengers = []
+    previous_last_name = ""
+    previous_country = ("", "")
+    for item in items:
+        passenger = _normalize_passenger(item, previous_last_name=previous_last_name, previous_country=previous_country)
+        if passenger["last_name"]:
+            previous_last_name = passenger["last_name"]
+        if passenger["nationality"] and passenger["country_name"]:
+            previous_country = (passenger["nationality"], passenger["country_name"])
+        passengers.append(passenger)
+    return passengers
+
+
+def _normalize_passenger(item, previous_last_name="", previous_country=("", "")):
     identity_no = _clean_identity(item.get("identity_no", ""))
     if _looks_like_placeholder_identity(identity_no):
         identity_no = ""
-    nationality, country_name = _country(item.get("nationality", ""), item.get("country_name", ""))
+    raw_last_name = item.get("last_name", "")
+    raw_nationality = item.get("nationality", "")
+    raw_country_name = item.get("country_name", "")
+    if _is_ditto(raw_nationality) or _is_ditto(raw_country_name):
+        nationality, country_name = previous_country
+    else:
+        nationality, country_name = _country(raw_nationality, raw_country_name)
+    last_name = previous_last_name if _is_ditto(raw_last_name) else _title_name(raw_last_name)
     return {
         "first_name": _title_name(item.get("first_name", "")),
-        "last_name": _title_name(item.get("last_name", "")),
+        "last_name": last_name,
         "identity_type": "tc" if re.fullmatch(r"\d{11}", identity_no) else "passport" if identity_no else "unknown",
         "identity_no": identity_no,
         "nationality": nationality,
@@ -273,6 +298,17 @@ def _looks_like_placeholder_identity(value):
     if re.fullmatch(r"(123456789|987654321|000000000|111111111)", text):
         return True
     return False
+
+
+def _is_ditto(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    key = _ascii_key(text)
+    return bool(
+        key in {"DITTO", "IDEM", "AYNI", "DENDEN", "TEKRAR"}
+        or re.fullmatch(r'["“”\'`´,]{1,4}|〃|/{1,4}|\\{1,4}|[|lIı1]{2,4}', text)
+    )
 
 
 def _country(nationality, country_name):
