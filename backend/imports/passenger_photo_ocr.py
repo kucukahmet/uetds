@@ -148,6 +148,7 @@ def extract_passengers_from_image(image_file, company=None):
                                 "El yazısı listelerde adlar solda, soyadlar yan kolonda, kimlik/pasaport sağ kolonda olabilir. "
                                 "Soyad veya ülke hücresinde denden/ditto işareti (\", '', ”, 〃, //, 11, ll, ,,), idem, aynı anlamına gelen "
                                 "tekrar işareti varsa bir üst okunabilir satırdaki aynı kolon değerini kullan. "
+                                "Denden işareti gördüğün hücreleri boş bırakma; simgeyi yazamadığın durumlarda da önceki aynı kolon değerini kullan. "
                                 "Denden işaretini asla adın parçası veya soyadın kendisi olarak yazma. "
                                 "Örneğin üst satır soyadı Tufan ise ve sonraki satırda ad hücresi 'Ömer Can', soyad hücresi denden ise "
                                 "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma. "
@@ -246,11 +247,11 @@ def _normalize_passenger(item, previous_last_name="", previous_country=("", ""))
     raw_last_name = item.get("last_name", "")
     raw_nationality = item.get("nationality", "")
     raw_country_name = item.get("country_name", "")
-    if _is_ditto(raw_nationality) or _is_ditto(raw_country_name):
+    if _should_carry_previous_value(raw_nationality, raw_country_name, previous_country=previous_country):
         nationality, country_name = previous_country
     else:
         nationality, country_name = _country(raw_nationality, raw_country_name)
-    last_name = previous_last_name if _is_ditto(raw_last_name) else _title_name(raw_last_name)
+    last_name = previous_last_name if _should_carry_previous_value(raw_last_name, previous_last_name=previous_last_name) else _title_name(raw_last_name)
     return {
         "first_name": _title_name(item.get("first_name", "")),
         "last_name": last_name,
@@ -285,7 +286,9 @@ def _openai_error_message(response):
 
 
 def _clean_identity(value):
-    text = str(value or "").replace(" ", "").strip()
+    text = str(value or "").replace(" ", "").strip().upper()
+    text = re.sub(r"^(T\.?C\.?|TCKN|TCNO|TCKIMLIKNO|KIMLIKNO|KİMLİKNO|PASAPORT|PASSPORT)[:.\-]*", "", text)
+    text = re.sub(r"[^A-Z0-9]", "", text)
     return re.sub(r"\.0+$", "", text).upper()
 
 
@@ -309,6 +312,14 @@ def _is_ditto(value):
         key in {"DITTO", "IDEM", "AYNI", "DENDEN", "TEKRAR"}
         or re.fullmatch(r'["“”\'`´,]{1,4}|〃|/{1,4}|\\{1,4}|[|lIı1]{2,4}', text)
     )
+
+
+def _should_carry_previous_value(*values, previous_last_name="", previous_country=("", "")):
+    has_previous = bool(previous_last_name or any(previous_country))
+    if not has_previous:
+        return False
+    texts = [str(value or "").strip() for value in values]
+    return all(not text for text in texts) or any(_is_ditto(text) for text in texts)
 
 
 def _country(nationality, country_name):

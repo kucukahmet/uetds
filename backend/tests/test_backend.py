@@ -683,8 +683,9 @@ def test_passenger_photo_ocr_service_fills_ditto_surname_from_previous_row(monke
                         "message": {
                             "content": (
                                 '{"passengers":['
-                                '{"first_name":"PERRHAN","last_name":"TUFAN","identity_no":"1114789745038","nationality":"TR"},'
-                                '{"first_name":"ÖMER CAN","last_name":"11","identity_no":"1114678748768","nationality":"11"}'
+                                '{"first_name":"PERRHAN","last_name":"TUFAN","identity_no":"T.C.11478875038","nationality":"TR"},'
+                                '{"first_name":"ÖMER CAN","last_name":"","identity_no":"T.C.11467828768","nationality":""},'
+                                '{"first_name":"YAREN","last_name":"11","identity_no":"T.C.11059884890","nationality":"11"}'
                                 '],"raw_text":""}'
                             )
                         }
@@ -699,8 +700,11 @@ def test_passenger_photo_ocr_service_fills_ditto_surname_from_previous_row(monke
 
     assert result["passengers"][1]["first_name"] == "Ömer Can"
     assert result["passengers"][1]["last_name"] == "Tufan"
+    assert result["passengers"][1]["identity_no"] == "11467828768"
+    assert result["passengers"][1]["identity_type"] == "tc"
     assert result["passengers"][1]["nationality"] == "TR"
     assert result["passengers"][1]["country_name"] == "Türkiye"
+    assert result["passengers"][2]["last_name"] == "Tufan"
 
 
 def test_passenger_photo_ocr_service_records_company_token_usage(monkeypatch, settings):
