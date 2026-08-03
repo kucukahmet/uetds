@@ -151,7 +151,7 @@ def extract_passengers_from_image(image_file, company=None):
                                 "Denden işareti gördüğün hücreleri boş bırakma; simgeyi yazamadığın durumlarda da önceki aynı kolon değerini kullan. "
                                 "Denden işaretini asla adın parçası veya soyadın kendisi olarak yazma. "
                                 "Örneğin üst satır soyadı Tufan ise ve sonraki satırda ad hücresi 'Ömer Can', soyad hücresi denden ise "
-                                "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma ve Tufan'ı Yufan gibi varyantlama. "
+                                "first_name='Ömer Can', last_name='Tufan' döndür; 'Can'ı soyad yapma ve Tufan'ı Yufan/Wafon gibi varyantlama. "
                                 "Örnek veya tahmini pasaport üretme; GA1234567, AB1234567, 123456789 gibi "
                                 "placeholder görünümlü değerleri asla yazma. Okuyamıyorsan identity_no alanını boş bırak."
                             ),
@@ -314,7 +314,7 @@ def _is_ditto(value):
         return False
     key = _ascii_key(text)
     return bool(
-        key in {"DITTO", "IDEM", "AYNI", "DENDEN", "TEKRAR"}
+        key in {"DITTO", "IDEM", "AYNI", "DENDEN", "TEKRAR", "YUFAN", "WAFON"}
         or re.fullmatch(r'["“”\'`´,]{1,4}|〃|/{1,4}|\\{1,4}|[|lIı1]{2,4}', text)
     )
 
