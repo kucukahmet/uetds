@@ -34,9 +34,15 @@ export default function UetdsSettingsScreen() {
   const tone = statusTone(selectedStatus?.severity);
 
   useEffect(() => {
-    setAiEnabled(Boolean(company?.settings?.ai_passenger_parse_enabled));
-    setAiLimit(String(company?.settings?.ai_passenger_parse_monthly_token_limit || ""));
-  }, [company?.id, company?.settings?.ai_passenger_parse_enabled, company?.settings?.ai_passenger_parse_monthly_token_limit]);
+    setAiEnabled(Boolean(company?.settings?.ai_passenger_parse_enabled ?? photoOcrStatus.data?.enabled));
+    setAiLimit(String(company?.settings?.ai_passenger_parse_monthly_token_limit ?? photoOcrStatus.data?.token_limit ?? ""));
+  }, [
+    company?.id,
+    company?.settings?.ai_passenger_parse_enabled,
+    company?.settings?.ai_passenger_parse_monthly_token_limit,
+    photoOcrStatus.data?.enabled,
+    photoOcrStatus.data?.token_limit
+  ]);
 
   const save = useMutation({
     mutationFn: () => endpoints.saveUetdsCredentials(environment, username.trim(), password),
