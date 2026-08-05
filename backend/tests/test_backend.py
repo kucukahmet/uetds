@@ -681,6 +681,7 @@ def test_passenger_text_parse_service_uses_prompt_and_normalizes_whatsapp_text(m
     Duru Ada Gültekin-31975580334
     Fatma bilaloğlu- 32693109272
     Sinem yeşil- 20071189930
+    Seval ortatepe 21586074216
     [19:25, 03.08.2026] Çağrı: 20:30 / 02:59 bugün
     48 AAL 247 çağrı 17951639708
     Transfer
@@ -702,7 +703,8 @@ def test_passenger_text_parse_service_uses_prompt_and_normalizes_whatsapp_text(m
                                 '{"first_name":"ASYA MELİS","last_name":"GÜLTEKİN","identity_no":"42203122950","nationality":"TR","gender":"K"},'
                                 '{"first_name":"DURU ADA","last_name":"GÜLTEKİN","identity_no":"31975580334","nationality":"TR","gender":"K"},'
                                 '{"first_name":"FATMA","last_name":"BİLALOĞLU-","identity_no":"32693109272","nationality":"TR","gender":"K"},'
-                                '{"first_name":"SİNEM","last_name":"YEŞİL-","identity_no":"20071189930","nationality":"TR","gender":"K"}'
+                                '{"first_name":"SİNEM","last_name":"YEŞİL-","identity_no":"20071189930","nationality":"TR","gender":"K"},'
+                                '{"first_name":"SEVAL","last_name":"ORTATEPE","identity_no":"21586074216","nationality":"TR","gender":""}'
                                 '],"raw_text":""}'
                             )
                         }
@@ -723,11 +725,13 @@ def test_passenger_text_parse_service_uses_prompt_and_normalizes_whatsapp_text(m
     assert "Sadece yolcu satırlarını al" in prompt
     assert "Tire veya iki nokta kimlikten önce ayraçtır; soyadın parçası değildir" in prompt
     assert "48 AAL 247" in prompt
-    assert len(result["passengers"]) == 4
+    assert len(result["passengers"]) == 5
     assert result["passengers"][0]["first_name"] == "Asya Melis"
     assert result["passengers"][0]["last_name"] == "Gültekin"
     assert result["passengers"][2]["last_name"] == "Bilaloğlu"
     assert result["passengers"][3]["last_name"] == "Yeşil"
+    assert result["passengers"][4]["last_name"] == "Ortatepe"
+    assert result["passengers"][4]["gender"] == "K"
     assert {item["gender"] for item in result["passengers"]} == {"K"}
     assert result["usage"]["total_tokens"] == 110
 

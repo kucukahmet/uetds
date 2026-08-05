@@ -45,6 +45,23 @@ COUNTRY_ALIASES = {
     "PORTUGUESE": ("PT", "Portekiz"),
     "PORTUGUES": ("PT", "Portekiz"),
 }
+COMMON_TURKISH_GIVEN_NAME_GENDERS = {
+    "ADA": "K",
+    "ASYA": "K",
+    "DURU": "K",
+    "FATMA": "K",
+    "MELIS": "K",
+    "MELİS": "K",
+    "NEVIN": "K",
+    "NEVİN": "K",
+    "NISA": "K",
+    "NİSA": "K",
+    "SEVAL": "K",
+    "SIDDIKA": "K",
+    "SINEM": "K",
+    "SİNEM": "K",
+    "SUDE": "K",
+}
 
 
 class PhotoOcrNotConfigured(APIException):
@@ -235,6 +252,8 @@ def extract_passengers_from_text(raw_text, company=None):
                         "Örnek: 'Sıddıka Sude babayiğit 10219440832' => first_name='Sıddıka Sude', last_name='Babayiğit'. "
                         "11 haneli sayısal kimlikleri T.C. kimlik olarak identity_no alanına yaz; nationality='TR', country_name='Türkiye' kullan. "
                         "Cinsiyet açıkça yazıyorsa kullan. Yazmıyorsa Türkiye'deki yaygın adlardan yüksek güvenle çıkarabiliyorsan E/K doldur; emin değilsen boş bırak. "
+                        "Örnek kadın adları: Asya, Melis, Duru, Ada, Fatma, Sinem, Nevin, Nisa, Seval, Sıddıka, Sude => K. "
+                        "Deniz gibi unisex adlarda bağlam çok net değilse boş bırak. "
                         "Yolcu olmayan telefonları passenger phone alanına yazma. Kimlik numarası olmayan satırları yolcuya dönüştürme. "
                         "Pasaport varsa identity_no alanına yaz ve ülke bilgisi metinden geliyorsa kullan. "
                         "Metin:\n"
@@ -355,7 +374,7 @@ def _normalize_passenger(item, previous_values=None):
         "identity_no": identity_no,
         "nationality": nationality,
         "country_name": country_name,
-        "gender": _carry_text_value(item.get("gender", ""), previous_values.get("gender", ""), _gender),
+        "gender": _gender_or_infer(item.get("gender", ""), previous_values.get("gender", ""), first_name),
         "seat_no": _digits(item.get("seat_no", ""), max_length=3),
         "phone": _carry_text_value(item.get("phone", ""), previous_values.get("phone", ""), _phone),
     }
@@ -452,6 +471,19 @@ def _gender(value):
         return "E"
     if text in {"K", "KADIN", "F", "FEMALE"}:
         return "K"
+    return ""
+
+
+def _gender_or_infer(raw_value, previous_value, first_name):
+    gender = _carry_text_value(raw_value, previous_value, _gender)
+    return gender or _infer_gender_from_first_name(first_name)
+
+
+def _infer_gender_from_first_name(first_name):
+    for token in str(first_name or "").split():
+        gender = COMMON_TURKISH_GIVEN_NAME_GENDERS.get(_ascii_key(token))
+        if gender:
+            return gender
     return ""
 
 
