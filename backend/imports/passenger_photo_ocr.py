@@ -13,7 +13,8 @@ from companies.models import CompanySettings
 
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-PHOTO_OCR_UNCONFIGURED_MESSAGE = "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak."
+MAX_TEXT_CHARS = 20_000
+PHOTO_OCR_UNCONFIGURED_MESSAGE = "AI yolcu parse henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak."
 COUNTRY_ALIASES = {
     "BE": ("BE", "Belçika"),
     "BELCIKA": ("BE", "Belçika"),
@@ -73,7 +74,7 @@ def get_passenger_photo_ocr_status(company=None):
     tokens_remaining = max(token_limit - tokens_used, 0) if token_limit else None
     limit_reached = bool(token_limit and tokens_used >= token_limit)
     available = configured and enabled and not limit_reached
-    message = "Foto/OCR hazır."
+    message = "AI yolcu parse hazır."
     if not configured:
         message = PHOTO_OCR_UNCONFIGURED_MESSAGE
     elif not enabled:
@@ -184,6 +185,84 @@ def extract_passengers_from_image(image_file, company=None):
         "raw_text": str(parsed.get("raw_text") or ""),
         "provider": "openai",
         "model": settings.OPENAI_VISION_MODEL,
+        "usage": usage,
+    }
+
+
+def extract_passengers_from_text(raw_text, company=None):
+    if not settings.OPENAI_API_KEY:
+        raise PhotoOcrNotConfigured()
+    if company:
+        _assert_company_ai_parse_available(company)
+
+    text = str(raw_text or "").strip()
+    if not text:
+        raise ValidationError({"text": "Metin zorunlu."})
+    if len(text) > MAX_TEXT_CHARS:
+        raise ValidationError({"text": f"Metin {MAX_TEXT_CHARS} karakterden kısa olmalı."})
+
+    response = requests.post(
+        settings.OPENAI_API_URL,
+        headers={
+            "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": settings.OPENAI_TEXT_MODEL,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You extract passenger rows from pasted transport manifest text for UETDS. "
+                        "Return strict JSON only. Extract passengers only; ignore trip metadata, route, price, driver, vehicle, date and time lines. "
+                        "Do not invent missing identity/passport numbers."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Metindeki yolcu listesini çıkar. "
+                        "JSON formatı: {\"passengers\":[{\"first_name\":\"\",\"last_name\":\"\","
+                        "\"identity_no\":\"\",\"nationality\":\"TR\",\"country_name\":\"Türkiye\","
+                        "\"gender\":\"E veya K veya boş\",\"seat_no\":\"\",\"phone\":\"\"}],\"raw_text\":\"\"}. "
+                        "WhatsApp zaman damgası ve gönderen adlarını sil; '[19:23] Çağrı:' gibi kısımlar yolcu değildir. "
+                        "Sadece yolcu satırlarını al. Saat, tarih, plaka, şoför adı/telefonu, transfer/rota/açıklama/ücret satırlarını yok say. "
+                        "Her yolcu satırı 'Ad Soyad-42203122950', 'Ad Soyad 42203122950' veya benzeri formatta gelebilir. "
+                        "Tire veya iki nokta kimlikten önce ayraçtır; soyadın parçası değildir. "
+                        "Örnek: 'Fatma bilaloğlu- 32693109272' => first_name='Fatma', last_name='Bilaloğlu', identity_no='32693109272'. "
+                        "Türk isimlerinde son kelime genelde soyaddır; önceki kelimeler ad alanına aittir. "
+                        "Örnek: 'Asya melis Gültekin-42203122950' => first_name='Asya Melis', last_name='Gültekin'. "
+                        "Örnek: 'Sıddıka Sude babayiğit 10219440832' => first_name='Sıddıka Sude', last_name='Babayiğit'. "
+                        "11 haneli sayısal kimlikleri T.C. kimlik olarak identity_no alanına yaz; nationality='TR', country_name='Türkiye' kullan. "
+                        "Cinsiyet açıkça yazıyorsa kullan. Yazmıyorsa Türkiye'deki yaygın adlardan yüksek güvenle çıkarabiliyorsan E/K doldur; emin değilsen boş bırak. "
+                        "Yolcu olmayan telefonları passenger phone alanına yazma. Kimlik numarası olmayan satırları yolcuya dönüştürme. "
+                        "Pasaport varsa identity_no alanına yaz ve ülke bilgisi metinden geliyorsa kullan. "
+                        "Metin:\n"
+                        f"{text}"
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        },
+        timeout=settings.OPENAI_TIMEOUT_SECONDS,
+    )
+    if response.status_code >= 400:
+        raise ValidationError({"text": _openai_error_message(response)})
+
+    payload = response.json()
+    usage = _normalize_usage(payload.get("usage"))
+    if company and usage["total_tokens"]:
+        _record_company_ai_usage(company, usage["total_tokens"])
+    content = payload["choices"][0]["message"]["content"]
+    parsed = _loads_json_object(content)
+    passengers = _normalize_passengers(parsed.get("passengers", []))
+    passengers = [item for item in passengers if item["first_name"] or item["last_name"] or item["identity_no"]]
+    return {
+        "passengers": passengers,
+        "raw_text": str(parsed.get("raw_text") or text),
+        "provider": "openai",
+        "model": settings.OPENAI_TEXT_MODEL,
         "usage": usage,
     }
 
@@ -388,10 +467,12 @@ def _phone(value):
 
 def _title_name(value):
     text = re.sub(r"\s+", " ", str(value or "").strip())
+    text = re.sub(r"^[\-:;,.]+|[\-:;,.]+$", "", text)
     return " ".join(_title_part(part) for part in text.split(" ") if part)
 
 
 def _title_part(value):
+    value = re.sub(r"^[\-:;,.]+|[\-:;,.]+$", "", value)
     lower = value.translate(str.maketrans({"I": "ı", "İ": "i"})).lower()
     return _upper_tr(lower[:1]) + lower[1:]
 

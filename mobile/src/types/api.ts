@@ -72,6 +72,8 @@ export type PassengerPhotoOcrResponse = {
   };
 };
 
+export type PassengerTextParseResponse = PassengerPhotoOcrResponse;
+
 export type PassengerPhotoOcrStatus = {
   available: boolean;
   enabled: boolean;

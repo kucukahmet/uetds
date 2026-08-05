@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from companies.models import Company, CompanyMembership, CompanySettings
 from fleet.models import Vehicle
-from imports.passenger_photo_ocr import extract_passengers_from_image
+from imports.passenger_photo_ocr import extract_passengers_from_image, extract_passengers_from_text
 from passengers.models import Passenger
 from people.models import Personnel
 from common.permissions import role_has_permission
@@ -504,6 +504,50 @@ def test_passenger_photo_ocr_endpoint_returns_parsed_passengers(monkeypatch):
     assert response.data["usage"]["total_tokens"] == 15
 
 
+def test_passenger_text_parse_endpoint_returns_ai_parsed_passengers(monkeypatch):
+    user = make_user()
+    company = make_company("Text Parse Firma")
+    company.settings.ai_passenger_parse_enabled = True
+    company.settings.save(update_fields=["ai_passenger_parse_enabled"])
+    make_membership(user, company)
+
+    def fake_extract(text, company=None):
+        assert "Fatma bilaloğlu" in text
+        assert company.name == "Text Parse Firma"
+        return {
+            "passengers": [
+                {
+                    "first_name": "Fatma",
+                    "last_name": "Bilaloğlu",
+                    "identity_type": "tc",
+                    "identity_no": "32693109272",
+                    "nationality": "TR",
+                    "country_name": "Türkiye",
+                    "gender": "K",
+                    "seat_no": "",
+                    "phone": "",
+                }
+            ],
+            "raw_text": text,
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+    monkeypatch.setattr("imports.views.extract_passengers_from_text", fake_extract)
+
+    response = auth_client(user, company).post(
+        "/api/v1/imports/passenger-text-parse/",
+        {"text": "Fatma bilaloğlu- 32693109272"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["passengers"][0]["last_name"] == "Bilaloğlu"
+    assert response.data["passengers"][0]["gender"] == "K"
+    assert response.data["usage"]["total_tokens"] == 15
+
+
 def test_passenger_photo_ocr_status_reports_missing_key(settings):
     settings.OPENAI_API_KEY = ""
     user = make_user()
@@ -518,7 +562,7 @@ def test_passenger_photo_ocr_status_reports_missing_key(settings):
         "enabled": False,
         "provider": "openai",
         "model": settings.OPENAI_VISION_MODEL,
-        "message": "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak.",
+        "message": "AI yolcu parse henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak.",
         "token_limit": 50000,
         "tokens_used": 0,
         "tokens_remaining": 50000,
@@ -537,7 +581,7 @@ def test_passenger_photo_ocr_endpoint_reports_missing_key_as_unavailable(setting
     response = auth_client(user, company).post("/api/v1/imports/passenger-photo-ocr/", {"image": image}, format="multipart")
 
     assert response.status_code == 503
-    assert response.data["message"]["detail"] == "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak."
+    assert response.data["message"]["detail"] == "AI yolcu parse henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak."
     assert response.data["error_code"] == "photo_ocr_not_configured"
 
 
@@ -625,6 +669,67 @@ def test_passenger_photo_ocr_service_normalizes_openai_response(monkeypatch, set
         "seat_no": "",
         "phone": "",
     }
+
+
+def test_passenger_text_parse_service_uses_prompt_and_normalizes_whatsapp_text(monkeypatch, settings):
+    settings.OPENAI_API_KEY = "test-key"
+    settings.OPENAI_TEXT_MODEL = "gpt-text-test"
+    captured = {}
+
+    raw_text = """
+    [19:23, 03.08.2026] Çağrı: Asya melis Gültekin-42203122950
+    Duru Ada Gültekin-31975580334
+    Fatma bilaloğlu- 32693109272
+    Sinem yeşil- 20071189930
+    [19:25, 03.08.2026] Çağrı: 20:30 / 02:59 bugün
+    48 AAL 247 çağrı 17951639708
+    Transfer
+    Ortaca - fethiye - ortaca gidiş dönüş sefer listesidir
+    1400₺
+    """
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "usage": {"prompt_tokens": 80, "completion_tokens": 30, "total_tokens": 110},
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"passengers":['
+                                '{"first_name":"ASYA MELİS","last_name":"GÜLTEKİN","identity_no":"42203122950","nationality":"TR","gender":"K"},'
+                                '{"first_name":"DURU ADA","last_name":"GÜLTEKİN","identity_no":"31975580334","nationality":"TR","gender":"K"},'
+                                '{"first_name":"FATMA","last_name":"BİLALOĞLU-","identity_no":"32693109272","nationality":"TR","gender":"K"},'
+                                '{"first_name":"SİNEM","last_name":"YEŞİL-","identity_no":"20071189930","nationality":"TR","gender":"K"}'
+                                '],"raw_text":""}'
+                            )
+                        }
+                    }
+                ],
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured["payload"] = json
+        return FakeResponse()
+
+    monkeypatch.setattr("imports.passenger_photo_ocr.requests.post", fake_post)
+
+    result = extract_passengers_from_text(raw_text)
+
+    prompt = captured["payload"]["messages"][1]["content"]
+    assert captured["payload"]["model"] == "gpt-text-test"
+    assert "Sadece yolcu satırlarını al" in prompt
+    assert "Tire veya iki nokta kimlikten önce ayraçtır; soyadın parçası değildir" in prompt
+    assert "48 AAL 247" in prompt
+    assert len(result["passengers"]) == 4
+    assert result["passengers"][0]["first_name"] == "Asya Melis"
+    assert result["passengers"][0]["last_name"] == "Gültekin"
+    assert result["passengers"][2]["last_name"] == "Bilaloğlu"
+    assert result["passengers"][3]["last_name"] == "Yeşil"
+    assert {item["gender"] for item in result["passengers"]} == {"K"}
+    assert result["usage"]["total_tokens"] == 110
 
 
 def test_passenger_photo_ocr_service_normalizes_common_european_nationalities(monkeypatch, settings):

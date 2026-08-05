@@ -1,6 +1,6 @@
 from common.views import TenantModelViewSet
 from imports.models import ImportBatch
-from imports.passenger_photo_ocr import extract_passengers_from_image, get_passenger_photo_ocr_status
+from imports.passenger_photo_ocr import extract_passengers_from_image, extract_passengers_from_text, get_passenger_photo_ocr_status
 from imports.serializers import ImportBatchSerializer
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -28,6 +28,13 @@ class ImportBatchViewSet(TenantModelViewSet):
         if not image:
             raise ValidationError({"image": "Fotoğraf zorunlu."})
         result = extract_passengers_from_image(image, company=company)
+        return Response(result)
+
+    @action(detail=False, methods=["post"], url_path="passenger-text-parse")
+    def passenger_text_parse(self, request):
+        company = self.get_company()
+        self.check_company_permission(company, "trip:create")
+        result = extract_passengers_from_text(request.data.get("text", ""), company=company)
         return Response(result)
 
     @action(detail=False, methods=["get"], url_path="passenger-photo-ocr/status")

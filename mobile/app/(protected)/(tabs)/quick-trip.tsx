@@ -21,7 +21,6 @@ import { normalizePlate } from "@/lib/format";
 import { genderOptions } from "@/lib/options";
 import { pickPassengerExcel } from "@/lib/passengerExcel";
 import { pickPassengerPhotoForOcr, type PassengerPhotoOcrSource } from "@/lib/passengerPhotoOcr";
-import { parsePassengerText } from "@/lib/passengerImport";
 import { sanitizePassengerIdentity } from "@/lib/passengerValidation";
 import { quickTripSchema } from "@/lib/validation";
 import { colors, radius, spacing } from "@/theme/tokens";
@@ -223,6 +222,7 @@ export default function QuickTripScreen() {
   const [validationStep, setValidationStep] = useState<number | null>(null);
   const [shakeKey, setShakeKey] = useState(0);
   const [isPhotoImporting, setIsPhotoImporting] = useState(false);
+  const [isTextImporting, setIsTextImporting] = useState(false);
   const [importFeedback, setImportFeedback] = useState<ImportFeedback>(null);
   const vehicles = useQuery({ queryKey: queryKeys.vehicles("?status=active"), queryFn: () => endpoints.vehicles("?status=active") });
   const drivers = useQuery({ queryKey: queryKeys.personnel("?type=driver&status=active"), queryFn: () => endpoints.personnel("?type=driver&status=active") });
@@ -277,14 +277,35 @@ export default function QuickTripScreen() {
     setImportFeedback({ tone: "success", message });
   };
 
-  const addParsedPassengers = () => {
-    const parsed = parsePassengerText(state.passenger_import_text);
-    if (!parsed.length) {
-      setImportFeedback({ tone: "error", message: "Metinden yolcu bulunamadı." });
-      Alert.alert("Yolcu bulunamadı", "Her satıra ad soyad ve kimlik/pasaport bilgisi gelecek şekilde tekrar deneyin.");
+  const addParsedPassengers = async () => {
+    const text = state.passenger_import_text.trim();
+    if (!text) {
+      setImportFeedback({ tone: "error", message: "Ayrıştırılacak metin girilmedi." });
+      Alert.alert("Metin boş", "Yolcu listesini yapıştırıp tekrar deneyin.");
       return;
     }
-    replaceParsedPassengers(parsed, `${parsed.length} yolcu metinden ayrıştırıldı.`);
+    const ready = await isPassengerAiParseReady("Metin ayrıştırma hazır değil");
+    if (!ready) {
+      return;
+    }
+    try {
+      setIsTextImporting(true);
+      setImportFeedback(null);
+      const response = await endpoints.passengerTextParse(text);
+      if (!response.passengers.length) {
+        setImportFeedback({ tone: "error", message: "AI metinden yolcu bulamadı." });
+        Alert.alert("Yolcu bulunamadı", "Yapıştırılan metinde kimlik/pasaport içeren yolcu satırı bulunamadı.");
+        return;
+      }
+      replaceParsedPassengers(response.passengers, `AI metinden ayıkladı: ${response.passengers.length} yolcu bulundu.`);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
+    } catch (error) {
+      setImportFeedback({ tone: "error", message: "AI metin ayrıştırma başarısız oldu." });
+      Alert.alert("Metin ayrıştırılamadı", getFeedbackMessage(error, "Metni kontrol edip tekrar deneyin."));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
+    } finally {
+      setIsTextImporting(false);
+    }
   };
 
   const addExcelPassengers = async () => {
@@ -303,7 +324,7 @@ export default function QuickTripScreen() {
   };
 
   const addPhotoPassengers = async (source: PassengerPhotoOcrSource) => {
-    const ready = await isPhotoOcrReady();
+    const ready = await isPassengerAiParseReady("Foto/OCR hazır değil");
     if (!ready) {
       return;
     }
@@ -327,16 +348,16 @@ export default function QuickTripScreen() {
     }
   };
 
-  const isPhotoOcrReady = async () => {
+  const isPassengerAiParseReady = async (title: string) => {
     try {
       const status = photoOcrStatus.data ?? (await photoOcrStatus.refetch()).data;
       if (status && !status.available) {
-        Alert.alert("Foto/OCR hazır değil", status.message || "Foto/OCR anahtarı eklendiğinde aktif olacak.");
+        Alert.alert(title, status.message || "AI yolcu parse anahtarı eklendiğinde aktif olacak.");
         return false;
       }
       return true;
     } catch (error) {
-      Alert.alert("Foto/OCR durumu alınamadı", getFeedbackMessage(error, "Backend bağlantısını kontrol edip tekrar deneyin."));
+      Alert.alert("AI parse durumu alınamadı", getFeedbackMessage(error, "Backend bağlantısını kontrol edip tekrar deneyin."));
       return false;
     }
   };
@@ -440,6 +461,7 @@ export default function QuickTripScreen() {
           addExcelPassengers={() => void addExcelPassengers()}
           addPhotoPassengers={(source) => void addPhotoPassengers(source)}
           isPhotoImporting={isPhotoImporting}
+          isTextImporting={isTextImporting}
           importFeedback={importFeedback}
           photoOcrStatus={photoOcrStatus.data}
           photoOcrUnavailableMessage={photoOcrStatus.data?.available === false ? photoOcrStatus.data.message : ""}
@@ -731,6 +753,7 @@ function PassengerStep({
   addExcelPassengers,
   addPhotoPassengers,
   isPhotoImporting,
+  isTextImporting,
   importFeedback,
   photoOcrStatus,
   photoOcrUnavailableMessage,
@@ -746,6 +769,7 @@ function PassengerStep({
   addExcelPassengers: () => void;
   addPhotoPassengers: (source: PassengerPhotoOcrSource) => void;
   isPhotoImporting: boolean;
+  isTextImporting: boolean;
   importFeedback: ImportFeedback;
   photoOcrStatus?: PassengerPhotoOcrStatus;
   photoOcrUnavailableMessage: string;
@@ -753,6 +777,7 @@ function PassengerStep({
   shakeKey: number;
 }) {
   const photoImportDisabled = Boolean(photoOcrStatus && !photoOcrStatus.available);
+  const textImportDisabled = photoImportDisabled || isTextImporting || isPhotoImporting;
   const tokenStatus = formatPhotoOcrTokenStatus(photoOcrStatus);
 
   return (
@@ -767,7 +792,7 @@ function PassengerStep({
               icon="images"
               variant="ghost"
               loading={isPhotoImporting}
-              disabled={photoImportDisabled}
+              disabled={photoImportDisabled || isTextImporting}
               onPress={() => addPhotoPassengers("library")}
             />
             <Button
@@ -775,7 +800,7 @@ function PassengerStep({
               icon="camera"
               variant="ghost"
               loading={isPhotoImporting}
-              disabled={photoImportDisabled}
+              disabled={photoImportDisabled || isTextImporting}
               onPress={() => addPhotoPassengers("camera")}
             />
           </View>
@@ -787,7 +812,7 @@ function PassengerStep({
             </AppText>
           </View>
         ) : null}
-        {isPhotoImporting ? <AiLoadingBar /> : null}
+        {isPhotoImporting || isTextImporting ? <AiLoadingBar /> : null}
         {importFeedback ? (
           <View style={[styles.feedbackBox, importFeedback.tone === "success" ? styles.feedbackSuccess : styles.feedbackError]}>
             <AppText variant="labelLg" color={importFeedback.tone === "success" ? colors.secondary : colors.error}>
@@ -807,7 +832,14 @@ function PassengerStep({
           multiline
           placeholder="1 İngiltere NRF00000974 GERRAD FERGUSON E"
         />
-        <Button label="Metni Ayrıştır" icon="sparkles" variant="secondary" onPress={addParsedPassengers} />
+        <Button
+          label="AI ile Metni Ayrıştır"
+          icon="sparkles"
+          variant="secondary"
+          loading={isTextImporting}
+          disabled={textImportDisabled || !state.passenger_import_text.trim()}
+          onPress={addParsedPassengers}
+        />
       </Card>
       {state.passengers.map((passenger, index) => (
         <PassengerCard

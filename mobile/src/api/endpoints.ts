@@ -8,6 +8,7 @@ import type {
   Passenger,
   PassengerPhotoOcrResponse,
   PassengerPhotoOcrStatus,
+  PassengerTextParseResponse,
   Personnel,
   QuickCreatePayload,
   QuickCreateResponse,
@@ -62,6 +63,8 @@ export const endpoints = {
   createPassenger: (data: Partial<Passenger>) => apiRequest<Passenger>("/passengers/", { method: "POST", body: JSON.stringify(data) }),
   passengerPhotoOcrStatus: () => apiRequest<PassengerPhotoOcrStatus>("/imports/passenger-photo-ocr/status/"),
   passengerPhotoOcr: (data: FormData) => apiRequest<PassengerPhotoOcrResponse>("/imports/passenger-photo-ocr/", { method: "POST", body: data }),
+  passengerTextParse: (text: string) =>
+    apiRequest<PassengerTextParseResponse>("/imports/passenger-text-parse/", { method: "POST", body: JSON.stringify({ text }) }),
 
   locations: (query = "") => apiRequest<Paginated<SavedLocation>>(`/locations/${formatListQuery(query)}`),
   createLocation: (data: Partial<SavedLocation>) => apiRequest<SavedLocation>("/locations/", { method: "POST", body: JSON.stringify(data) }),

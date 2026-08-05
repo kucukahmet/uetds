@@ -218,9 +218,9 @@ describe("feedback helpers", () => {
       getFeedbackMessage({
         success: false,
         error_code: "photo_ocr_not_configured",
-        message: { detail: "Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak." }
+        message: { detail: "AI yolcu parse henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak." }
       })
-    ).toBe("Foto/OCR henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak.");
+    ).toBe("AI yolcu parse henüz bağlı değil. OPENAI_API_KEY eklendiğinde aktif olacak.");
   });
 });
 
