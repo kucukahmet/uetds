@@ -18,9 +18,9 @@ import { StickyActionBar } from "@/components/StickyActionBar";
 import { formatDateTime, fullName } from "@/lib/format";
 import { getActiveCompany, useAuthStore } from "@/store/auth";
 import { colors, spacing } from "@/theme/tokens";
-import type { SubmitUetdsResponse } from "@/types/api";
+import type { Personnel, SubmitUetdsResponse, Trip } from "@/types/api";
 
-type ConfirmAction = "delete" | "cancel-uetds";
+type ConfirmAction = "submit-uetds" | "delete" | "cancel-uetds";
 
 const UETDS_CANCEL_PROPAGATION_MESSAGE =
   "İptal isteği başarıyla alınsa bile e-Devlet/Bakanlık paneline yansıması yaklaşık 30 dakikayı bulabilir. Bu sürede panelde geçerli görünmesi normaldir.";
@@ -42,7 +42,10 @@ export default function TripDetailScreen() {
     }
   });
   const returnTrip = useMutation({
-    mutationFn: () => endpoints.createReturnTrip(id, new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()),
+    mutationFn: () => {
+      const departureAt = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
+      return endpoints.createReturnTrip(id, departureAt, returnTripArrivalAt(query.data, departureAt));
+    },
     onSuccess: async (trip) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.tripsRoot() });
       router.push(`/trips/${trip.id}`);
@@ -73,6 +76,9 @@ export default function TripDetailScreen() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.trip(id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.tripsRoot() });
       router.push({ pathname: "/trips/failure", params: { tripId: id, environment: uetdsEnvironment, message: error instanceof Error ? error.message : "Gönderim başarısız" } });
+    },
+    onSettled: () => {
+      setConfirmAction((current) => (current === "submit-uetds" ? null : current));
     }
   });
   const cancelUetds = useMutation({
@@ -148,7 +154,16 @@ export default function TripDetailScreen() {
   const submitLabel = submitButtonLabel(trip.status, trip.uetds_sync_status, hasUetdsSubmission);
   const tripDrivers = (trip.personnel || []).filter((item) => item.role === "driver").map((item) => item.personnel);
   const confirmDialog =
-    confirmAction === "delete"
+    confirmAction === "submit-uetds"
+      ? {
+          title: "UETDS'ye gönderilsin mi?",
+          message: submitConfirmMessage(trip, tripDrivers),
+          confirmLabel: submitLabel,
+          confirmIcon: "cloud-upload" as const,
+          loading: submit.isPending,
+          onConfirm: () => submit.mutate()
+        }
+      : confirmAction === "delete"
       ? {
           title: "Sefer silinsin mi?",
           message: "Bu lokal sefer kaydı uygulamadan silinecek. UETDS'ye gönderilmiş seferler bu yolla silinmez.",
@@ -173,7 +188,7 @@ export default function TripDetailScreen() {
       footer={
         canSubmit ? (
           <StickyActionBar>
-            <Button label={submitLabel} icon="cloud-upload" loading={submit.isPending} onPress={() => submit.mutate()} />
+            <Button label={submitLabel} icon="cloud-upload" loading={submit.isPending} onPress={() => setConfirmAction("submit-uetds")} />
           </StickyActionBar>
         ) : null
       }
@@ -439,7 +454,7 @@ function ConfirmDialog({
   title: string;
   message: string;
   confirmLabel: string;
-  confirmIcon: "trash" | "close-circle";
+  confirmIcon: "cloud-upload" | "trash" | "close-circle";
   loading: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -478,6 +493,34 @@ async function openPdf(bytes: ArrayBuffer, filename: string, contentType: string
   } else {
     Alert.alert("PDF hazır", target);
   }
+}
+
+function submitConfirmMessage(trip: Trip, drivers: Personnel[]) {
+  const driverNames = drivers.length
+    ? drivers.map((driver) => fullName(driver.first_name, driver.last_name)).join(", ")
+    : trip.driver_detail
+      ? fullName(trip.driver_detail.first_name, trip.driver_detail.last_name)
+      : "-";
+  return [
+    "Bu işlem seferi seçili UETDS ortamına gönderecek.",
+    `Tarih: ${formatDateTime(trip.departure_at)}`,
+    `Araç: ${trip.vehicle_detail?.plate || "-"}`,
+    `Şoför: ${driverNames}`,
+    `Yolcu: ${trip.passenger_count} kişi`
+  ].join("\n");
+}
+
+function returnTripArrivalAt(source: Trip | undefined, departureAt: string) {
+  if (!source?.arrival_estimated_at) {
+    return undefined;
+  }
+  const sourceDeparture = new Date(source.departure_at).getTime();
+  const sourceArrival = new Date(source.arrival_estimated_at).getTime();
+  const returnDeparture = new Date(departureAt).getTime();
+  if (![sourceDeparture, sourceArrival, returnDeparture].every(Number.isFinite) || sourceArrival <= sourceDeparture) {
+    return undefined;
+  }
+  return new Date(returnDeparture + (sourceArrival - sourceDeparture)).toISOString();
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {

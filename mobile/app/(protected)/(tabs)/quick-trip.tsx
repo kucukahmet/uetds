@@ -512,6 +512,10 @@ function VehicleStep({
   setDriver: (patch: Partial<WizardState["driver"]>) => void;
 }) {
   const chooseVehicle = (vehicle: Vehicle) => {
+    if (vehicle.uetds_status === "invalid") {
+      Alert.alert("Araç UETDS hatalı", "Bu araç UETDS kontrolünden geçmedi. Kayıtlar > Araçlar ekranından kontrolü düzeltmeden seferde kullanılamaz.");
+      return;
+    }
     setPartial({ selected_vehicle_id: vehicle.id });
     setVehicle({ plate: vehicle.plate, seat_capacity: String(vehicle.seat_capacity || 1) });
   };
@@ -778,7 +782,6 @@ function PassengerStep({
 }) {
   const photoImportDisabled = Boolean(photoOcrStatus && !photoOcrStatus.available);
   const textImportDisabled = photoImportDisabled || isTextImporting || isPhotoImporting;
-  const tokenStatus = formatPhotoOcrTokenStatus(photoOcrStatus);
 
   return (
     <>
@@ -819,11 +822,6 @@ function PassengerStep({
               {importFeedback.message}
             </AppText>
           </View>
-        ) : null}
-        {tokenStatus ? (
-          <AppText variant="labelMd" color={colors.textSubtle}>
-            {tokenStatus}
-          </AppText>
         ) : null}
         <Field
           label="Kopyala Yapıştır"
@@ -883,20 +881,6 @@ function AiLoadingBar() {
       </View>
     </View>
   );
-}
-
-function formatPhotoOcrTokenStatus(status?: PassengerPhotoOcrStatus) {
-  if (!status) {
-    return "";
-  }
-  if (!status.token_limit) {
-    return `AI kullanım: ${formatTokenCount(status.tokens_used)} token / limitsiz`;
-  }
-  return `AI kullanım: ${formatTokenCount(status.tokens_used)} / ${formatTokenCount(status.token_limit)} token`;
-}
-
-function formatTokenCount(value: number) {
-  return value.toLocaleString("tr-TR");
 }
 
 function PassengerCard({
@@ -1044,8 +1028,9 @@ function ReviewStep({ state, payload, errors }: { state: WizardState; payload: Q
       ) : (
         <Card style={styles.readyCard}>
           <AppText variant="titleLg" color={colors.secondary}>
-            UETDS gönderimine hazır
+            Sefer kaydına hazır
           </AppText>
+          <AppText color={colors.textMuted}>Oluşturduktan sonra detay ekranından UETDS'ye gönderebilirsin.</AppText>
         </Card>
       )}
     </>

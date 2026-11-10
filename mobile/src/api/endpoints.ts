@@ -81,10 +81,14 @@ export const endpoints = {
   quickCreateTrip: (data: QuickCreatePayload) =>
     apiRequest<QuickCreateResponse>("/trips/quick-create/", { method: "POST", body: JSON.stringify(data) }),
   duplicateTrip: (id: string) => apiRequest<Trip>(`/trips/${id}/duplicate/`, { method: "POST" }),
-  createReturnTrip: (id: string, departureAt: string) =>
+  createReturnTrip: (id: string, departureAt: string, arrivalEstimatedAt?: string) =>
     apiRequest<Trip>(`/trips/${id}/create-return-trip/`, {
       method: "POST",
-      body: JSON.stringify({ departure_at: departureAt, route_note: "Mobil dönüş seferi" })
+      body: JSON.stringify({
+        departure_at: departureAt,
+        arrival_estimated_at: arrivalEstimatedAt,
+        route_note: "Mobil dönüş seferi"
+      })
     }),
   tripDetailPdf: (id: string) => apiBinaryRequest(`/trips/${id}/detail-pdf/`),
 

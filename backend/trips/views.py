@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.decorators import action
@@ -120,6 +123,10 @@ class TripViewSet(TenantModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        status_in = self.request.query_params.get("status_in")
+        if status_in:
+            statuses = [value.strip() for value in status_in.split(",") if value.strip()]
+            queryset = queryset.filter(status__in=statuses)
         time_scope = self.request.query_params.get("time_scope")
         if time_scope == "upcoming":
             return queryset.filter(departure_at__gte=timezone.now())
@@ -266,6 +273,10 @@ class TripViewSet(TenantModelViewSet):
     @action(detail=True, methods=["post"], url_path="create-return-trip")
     def create_return_trip(self, request, pk=None):
         source = self.get_object()
+        departure_at = self._return_trip_datetime(request.data.get("departure_at"), "departure_at") or source.departure_at
+        arrival_estimated_at = self._return_trip_datetime(request.data.get("arrival_estimated_at"), "arrival_estimated_at")
+        if arrival_estimated_at is None:
+            arrival_estimated_at = departure_at + self._source_trip_duration(source)
         with transaction.atomic():
             trip = Trip.objects.create(
                 company=source.company,
@@ -273,8 +284,8 @@ class TripViewSet(TenantModelViewSet):
                 status="draft",
                 vehicle=source.vehicle,
                 driver=source.driver,
-                departure_at=request.data.get("departure_at") or source.departure_at,
-                arrival_estimated_at=request.data.get("arrival_estimated_at") or source.arrival_estimated_at,
+                departure_at=departure_at,
+                arrival_estimated_at=arrival_estimated_at,
                 departure_city=source.arrival_city,
                 departure_district=source.arrival_district,
                 departure_address=source.arrival_address,
@@ -318,6 +329,21 @@ class TripViewSet(TenantModelViewSet):
             for link in source.trip_personnel.all():
                 TripPersonnel.objects.create(company=trip.company, trip=trip, personnel=link.personnel, role=link.role)
         return Response(TripSerializer(trip).data)
+
+    def _return_trip_datetime(self, value, field_name):
+        if not value:
+            return None
+        parsed = parse_datetime(str(value))
+        if parsed is None:
+            raise ValidationError({field_name: "Geçerli bir tarih/saat gönderin."})
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    def _source_trip_duration(self, source):
+        if source.arrival_estimated_at and source.arrival_estimated_at > source.departure_at:
+            return source.arrival_estimated_at - source.departure_at
+        return timedelta(hours=2)
 
     @action(detail=True, methods=["post"], url_path="submit-uetds")
     def submit_uetds(self, request, pk=None):

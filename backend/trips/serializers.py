@@ -306,6 +306,8 @@ class TripUpdateSerializer(serializers.ModelSerializer):
         return driver
 
     def update(self, instance, validated_data):
+        had_uetds_reference = bool(instance.uetds_reference_no)
+        previous_status = instance.status
         driver_ids = validated_data.pop("driver_ids", None)
         group_payloads = validated_data.pop("groups", None)
         passenger_payloads = validated_data.pop("passengers", None)
@@ -327,9 +329,19 @@ class TripUpdateSerializer(serializers.ModelSerializer):
             instance._prefetched_objects_cache.pop("trip_passengers", None)
             instance._prefetched_objects_cache.pop("trip_personnel", None)
         instance.passenger_count = TripPassenger.objects.filter(company=instance.company, trip=instance).count()
-        instance.status = "ready" if QuickCreateTripSerializer(context=self.context).get_missing_fields(instance) == [] else "draft"
+        ready_for_uetds = QuickCreateTripSerializer(context=self.context).get_missing_fields(instance) == []
+        instance.status = self._status_after_edit(instance, had_uetds_reference, previous_status, ready_for_uetds)
         instance.save(update_fields=["passenger_count", "status", "updated_at"])
         return instance
+
+    def _status_after_edit(self, instance, had_uetds_reference, previous_status, ready_for_uetds):
+        if not had_uetds_reference:
+            return Trip.Status.READY if ready_for_uetds else Trip.Status.DRAFT
+        if previous_status == Trip.Status.PARTIAL_FAILED:
+            return Trip.Status.PARTIAL_FAILED
+        if previous_status == Trip.Status.FAILED:
+            return Trip.Status.FAILED
+        return Trip.Status.SUBMITTED
 
     def _drivers_from_ids(self, driver_ids):
         if driver_ids is None:

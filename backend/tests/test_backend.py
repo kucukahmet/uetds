@@ -1235,6 +1235,26 @@ def test_trip_list_expired_unsent_scope_only_shows_past_unsent_trips():
     assert [item["id"] for item in response.data["results"]] == [str(past_unsent.id)]
 
 
+def test_trip_list_status_in_filters_multiple_statuses():
+    user = make_user()
+    company = make_company("Statü Firma")
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="34AAA001", seat_capacity=10)
+    driver = Personnel.objects.create(company=company, type="driver", first_name="A", last_name="B", identity_no="11111111110")
+    failed = _trip(company, user, vehicle, driver)
+    partial = _trip(company, user, vehicle, driver)
+    cancelled = _trip(company, user, vehicle, driver)
+    failed.status = Trip.Status.FAILED
+    partial.status = Trip.Status.PARTIAL_FAILED
+    cancelled.status = Trip.Status.CANCELLED
+    Trip.objects.bulk_update([failed, partial, cancelled], ["status", "updated_at"])
+
+    response = auth_client(user, company).get("/api/v1/trips/?status_in=failed,partial_failed")
+
+    assert response.status_code == 200
+    assert {item["id"] for item in response.data["results"]} == {str(failed.id), str(partial.id)}
+
+
 def test_cross_company_header_is_forbidden():
     user = make_user()
     company_a = make_company("Firma A")
@@ -1552,6 +1572,41 @@ def test_duplicate_clears_firm_trip_no_so_uetds_uses_new_trip_uuid():
     assert response.data["firm_trip_no"] == ""
 
 
+def test_return_trip_keeps_source_duration_from_requested_departure():
+    user = make_user()
+    company = make_company("Dönüş Firma")
+    make_membership(user, company)
+    vehicle = Vehicle.objects.create(company=company, plate="48 AAL 247", seat_capacity=16)
+    driver = Personnel.objects.create(company=company, type="driver", identity_no="57400000208", first_name="Hüseyin", last_name="Akbay")
+    departure = timezone.now().replace(microsecond=0)
+    trip = Trip.objects.create(
+        company=company,
+        created_by=user,
+        vehicle=vehicle,
+        driver=driver,
+        departure_at=departure,
+        arrival_estimated_at=departure + timedelta(hours=2, minutes=30),
+        departure_city="Muğla",
+        departure_district="Fethiye",
+        departure_address="Göcek",
+        arrival_city="Muğla",
+        arrival_district="Dalaman",
+        arrival_address="Dalaman Havalimanı",
+        passenger_count=1,
+        status="ready",
+    )
+    return_departure = departure + timedelta(days=1, hours=6)
+
+    response = auth_client(user, company).post(
+        f"/api/v1/trips/{trip.id}/create-return-trip/",
+        {"departure_at": return_departure.isoformat()},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["arrival_estimated_at"] == timezone.localtime(return_departure + timedelta(hours=2, minutes=30)).isoformat()
+
+
 def test_trip_detail_pdf_endpoint_returns_pdf_bytes():
     user = make_user()
     company = make_company("ÖMER ACAR TURİZM TAŞIMACILIK LİMİTED ŞİRKETİ")
@@ -1669,7 +1724,8 @@ def test_trip_can_be_edited_after_uetds_submission_and_marks_update_required():
     trip = _trip(company, user, vehicle, driver)
     trip.status = "submitted"
     trip.uetds_reference_no = "123456"
-    trip.save(update_fields=["status", "uetds_reference_no"])
+    trip.uetds_last_submitted_hash = "previous-submission"
+    trip.save(update_fields=["status", "uetds_reference_no", "uetds_last_submitted_hash"])
 
     response = auth_client(user, company).patch(
         f"/api/v1/trips/{trip.id}/",
@@ -1678,9 +1734,11 @@ def test_trip_can_be_edited_after_uetds_submission_and_marks_update_required():
     )
 
     assert response.status_code == 200
-    assert response.data["uetds_sync_status"] in {"unknown", "update_required", "local_draft"}
+    assert response.data["status"] == "submitted"
+    assert response.data["uetds_sync_status"] == "update_required"
     assert response.data["uetds_has_unsent_changes"] is True
     trip.refresh_from_db()
+    assert trip.status == Trip.Status.SUBMITTED
     assert trip.departure_address == "Güncel biniş adresi"
 
 

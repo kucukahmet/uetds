@@ -16,10 +16,10 @@ import { colors, radius, spacing } from "@/theme/tokens";
 
 const filters = [
   { label: "Tümü", query: "?time_scope=upcoming" },
-  { label: "Gönderilmedi", query: "?status=ready&time_scope=upcoming" },
+  { label: "Gönderilmedi", query: "?status_in=draft,ready&time_scope=upcoming" },
   { label: "Gönderildi", query: "?status=submitted" },
-  { label: "Hatalı", query: "?status=failed" },
-  { label: "İptal", query: "?status=cancelled" }
+  { label: "Hatalı", query: "?status_in=failed,partial_failed" },
+  { label: "İptal", query: "?status_in=cancel_requested,cancelled" }
 ];
 
 export default function TripsScreen() {

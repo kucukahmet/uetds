@@ -20,11 +20,14 @@ import { StickyActionBar } from "@/components/StickyActionBar";
 import { TextField } from "@/components/TextField";
 import { resolveCountry, TURKEY_COUNTRY, type CountryOption } from "@/lib/countries";
 import { isValidTurkishIdentityNo, normalizeGenderCode } from "@/lib/driverValidation";
+import { getFeedbackMessage } from "@/lib/errors";
 import { goBackOrReplace } from "@/lib/navigation";
 import { genderOptions, identityOptions } from "@/lib/options";
+import { pickPassengerExcel } from "@/lib/passengerExcel";
+import { pickPassengerPhotoForOcr, type PassengerPhotoOcrSource } from "@/lib/passengerPhotoOcr";
 import { sanitizePassengerIdentity } from "@/lib/passengerValidation";
 import { colors, radius, spacing } from "@/theme/tokens";
-import type { LocationReference, Passenger, Personnel, Trip, TripUpdatePayload, Vehicle } from "@/types/api";
+import type { ImportedPassenger, LocationReference, Passenger, PassengerPhotoOcrStatus, Personnel, Trip, TripUpdatePayload, Vehicle } from "@/types/api";
 
 type IdentityType = Passenger["identity_type"];
 
@@ -73,15 +76,45 @@ type EditDraft = {
   passengers: PassengerEditDraft[];
 };
 
+type ImportFeedback = { tone: "success" | "error"; message: string } | null;
+
+type RouteEditErrors = {
+  departureLocation?: string;
+  departureDetail?: string;
+  arrivalLocation?: string;
+  arrivalDetail?: string;
+  groupName?: string;
+  groupPrice?: string;
+  groupDescription?: string;
+};
+
+type PassengerEditErrors = {
+  first_name?: string;
+  last_name?: string;
+  identity_type?: string;
+  identity_no?: string;
+  nationality?: string;
+  gender?: string;
+};
+
 export default function TripEditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
   const tripQuery = useQuery({ queryKey: queryKeys.trip(id), queryFn: () => endpoints.trip(id), enabled: Boolean(id) });
   const vehicles = useQuery({ queryKey: queryKeys.vehicles("?status=active"), queryFn: () => endpoints.vehicles("?status=active") });
   const drivers = useQuery({ queryKey: queryKeys.personnel("?type=driver&status=active"), queryFn: () => endpoints.personnel("?type=driver&status=active") });
+  const photoOcrStatus = useQuery({
+    queryKey: queryKeys.passengerPhotoOcrStatus(),
+    queryFn: endpoints.passengerPhotoOcrStatus,
+    staleTime: 60_000
+  });
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [validationStep, setValidationStep] = useState<number | null>(null);
+  const [passengerImportText, setPassengerImportText] = useState("");
+  const [isPhotoImporting, setIsPhotoImporting] = useState(false);
+  const [isTextImporting, setIsTextImporting] = useState(false);
+  const [importFeedback, setImportFeedback] = useState<ImportFeedback>(null);
 
   useEffect(() => {
     if (tripQuery.data && !draft) {
@@ -133,6 +166,100 @@ export default function TripEditScreen() {
       }
       return { ...current, passengers: current.passengers.filter((passenger) => passenger.id !== passengerId) };
     });
+  const replaceParsedPassengers = (parsed: ImportedPassenger[], message: string) => {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            passengers: parsed.map((passenger) => passengerEditDraftFromImport(passenger, current.group_id))
+          }
+        : current
+    );
+    setPassengerImportText("");
+    setValidationStep(null);
+    setImportFeedback({ tone: "success", message });
+  };
+  const addParsedPassengers = async () => {
+    const text = passengerImportText.trim();
+    if (!text) {
+      setImportFeedback({ tone: "error", message: "Ayrıştırılacak metin girilmedi." });
+      Alert.alert("Metin boş", "Yolcu listesini yapıştırıp tekrar deneyin.");
+      return;
+    }
+    const ready = await isPassengerAiParseReady("Metin ayrıştırma hazır değil");
+    if (!ready) {
+      return;
+    }
+    try {
+      setIsTextImporting(true);
+      setImportFeedback(null);
+      const response = await endpoints.passengerTextParse(text);
+      if (!response.passengers.length) {
+        setImportFeedback({ tone: "error", message: "AI metinden yolcu bulamadı." });
+        Alert.alert("Yolcu bulunamadı", "Yapıştırılan metinde kimlik/pasaport içeren yolcu satırı bulunamadı.");
+        return;
+      }
+      replaceParsedPassengers(response.passengers, `AI metinden ayıkladı: ${response.passengers.length} yolcu bulundu.`);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
+    } catch (error) {
+      setImportFeedback({ tone: "error", message: "AI metin ayrıştırma başarısız oldu." });
+      Alert.alert("Metin ayrıştırılamadı", getFeedbackMessage(error, "Metni kontrol edip tekrar deneyin."));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
+    } finally {
+      setIsTextImporting(false);
+    }
+  };
+  const addExcelPassengers = async () => {
+    try {
+      const parsed = await pickPassengerExcel();
+      if (!parsed.length) {
+        setImportFeedback({ tone: "error", message: "Excel dosyasında yolcu bulunamadı." });
+        Alert.alert("Yolcu bulunamadı", "Excel dosyasında ad, soyad ve kimlik/pasaport satırı bulunamadı.");
+        return;
+      }
+      replaceParsedPassengers(parsed, `${parsed.length} yolcu Excel'den aktarıldı.`);
+    } catch (error) {
+      setImportFeedback({ tone: "error", message: "Excel okunamadı." });
+      Alert.alert("Excel okunamadı", error instanceof Error ? error.message : "Dosyayı kontrol edip tekrar deneyin.");
+    }
+  };
+  const addPhotoPassengers = async (source: PassengerPhotoOcrSource) => {
+    const ready = await isPassengerAiParseReady("Foto/OCR hazır değil");
+    if (!ready) {
+      return;
+    }
+    try {
+      setIsPhotoImporting(true);
+      setImportFeedback(null);
+      const parsed = await pickPassengerPhotoForOcr(source);
+      if (!parsed.length) {
+        setImportFeedback({ tone: "error", message: "AI fotoğraftan yolcu bulamadı." });
+        Alert.alert("Yolcu bulunamadı", "Fotoğraftan yolcu satırı okunamadı. Daha net bir fotoğrafla tekrar deneyin.");
+        return;
+      }
+      replaceParsedPassengers(parsed, `AI başarıyla ayıkladı: ${parsed.length} yolcu bulundu.`);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
+    } catch (error) {
+      setImportFeedback({ tone: "error", message: "AI yolcu ayıklama başarısız oldu." });
+      Alert.alert("Foto/OCR başarısız", error instanceof Error ? error.message : "Fotoğrafı kontrol edip tekrar deneyin.");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.passengerPhotoOcrStatus() });
+    } finally {
+      setIsPhotoImporting(false);
+    }
+  };
+  const isPassengerAiParseReady = async (title: string) => {
+    try {
+      const status = photoOcrStatus.data ?? (await photoOcrStatus.refetch()).data;
+      if (status && !status.available) {
+        Alert.alert(title, status.message || "AI yolcu parse anahtarı eklendiğinde aktif olacak.");
+        return false;
+      }
+      return true;
+    } catch (error) {
+      Alert.alert("AI parse durumu alınamadı", getFeedbackMessage(error, "Backend bağlantısını kontrol edip tekrar deneyin."));
+      return false;
+    }
+  };
   const next = () => {
     const validationError = firstStepError(draft, stepIndex);
     if (validationError) {
@@ -210,9 +337,24 @@ export default function TripEditScreen() {
           patchDraft={patchDraft}
         />
       ) : stepIndex === 2 ? (
-        <RouteGroupStep draft={draft} patchDraft={patchDraft} />
+        <RouteGroupStep draft={draft} patchDraft={patchDraft} errors={validationStep === 2 ? getRouteEditErrors(draft) : {}} />
       ) : stepIndex === 3 ? (
-        <PassengersStep draft={draft} addPassenger={addPassenger} updatePassenger={updatePassenger} removePassenger={removePassenger} />
+        <PassengersStep
+          draft={draft}
+          passengerImportText={passengerImportText}
+          setPassengerImportText={setPassengerImportText}
+          addPassenger={addPassenger}
+          updatePassenger={updatePassenger}
+          removePassenger={removePassenger}
+          addParsedPassengers={() => void addParsedPassengers()}
+          addExcelPassengers={() => void addExcelPassengers()}
+          addPhotoPassengers={(source) => void addPhotoPassengers(source)}
+          isPhotoImporting={isPhotoImporting}
+          isTextImporting={isTextImporting}
+          importFeedback={importFeedback}
+          photoOcrStatus={photoOcrStatus.data}
+          passengerErrors={validationStep === 3 ? getPassengerEditErrors(draft) : []}
+        />
       ) : (
         <ReviewStep draft={draft} vehicles={vehicles.data?.results ?? []} drivers={drivers.data?.results ?? []} errors={allDraftErrors(draft)} />
       )}
@@ -314,7 +456,7 @@ function SelectionWarning({ message }: { message: string }) {
   );
 }
 
-function RouteGroupStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (patch: Partial<EditDraft>) => void }) {
+function RouteGroupStep({ draft, patchDraft, errors }: { draft: EditDraft; patchDraft: (patch: Partial<EditDraft>) => void; errors: RouteEditErrors }) {
   return (
     <>
       <Card>
@@ -327,6 +469,8 @@ function RouteGroupStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (
           place={draft.departure_place}
           cityCode={draft.departure_city_code}
           districtCode={draft.departure_district_code}
+          locationError={errors.departureLocation}
+          detailError={errors.departureDetail}
           onChange={patchDraft}
           prefix="departure"
         />
@@ -338,6 +482,8 @@ function RouteGroupStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (
           place={draft.arrival_place}
           cityCode={draft.arrival_city_code}
           districtCode={draft.arrival_district_code}
+          locationError={errors.arrivalLocation}
+          detailError={errors.arrivalDetail}
           onChange={patchDraft}
           prefix="arrival"
         />
@@ -346,10 +492,10 @@ function RouteGroupStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (
       <Card>
         <AppText variant="titleLg">Grup</AppText>
         <View style={styles.columns}>
-          <TextField label="Grup" value={draft.group_name} onChangeText={(group_name) => patchDraft({ group_name })} containerStyle={styles.columnField} />
-          <TextField label="Ücret" value={draft.group_price} onChangeText={(group_price) => patchDraft({ group_price })} keyboardType="decimal-pad" containerStyle={styles.columnField} />
+          <TextField label="Grup" value={draft.group_name} onChangeText={(group_name) => patchDraft({ group_name })} error={errors.groupName} containerStyle={styles.columnField} />
+          <TextField label="Ücret" value={draft.group_price} onChangeText={(group_price) => patchDraft({ group_price })} error={errors.groupPrice} keyboardType="decimal-pad" containerStyle={styles.columnField} />
         </View>
-        <TextField label="Grup Açıklaması" value={draft.group_description} onChangeText={(group_description) => patchDraft({ group_description, route_note: group_description })} multiline />
+        <TextField label="Grup Açıklaması" value={draft.group_description} onChangeText={(group_description) => patchDraft({ group_description, route_note: group_description })} error={errors.groupDescription} multiline />
       </Card>
     </>
   );
@@ -357,36 +503,108 @@ function RouteGroupStep({ draft, patchDraft }: { draft: EditDraft; patchDraft: (
 
 function PassengersStep({
   draft,
+  passengerImportText,
+  setPassengerImportText,
   addPassenger,
   updatePassenger,
-  removePassenger
+  removePassenger,
+  addParsedPassengers,
+  addExcelPassengers,
+  addPhotoPassengers,
+  isPhotoImporting,
+  isTextImporting,
+  importFeedback,
+  photoOcrStatus,
+  passengerErrors
 }: {
   draft: EditDraft;
+  passengerImportText: string;
+  setPassengerImportText: (value: string) => void;
   addPassenger: () => void;
   updatePassenger: (id: string, patch: Partial<PassengerEditDraft>) => void;
   removePassenger: (id: string) => void;
+  addParsedPassengers: () => void;
+  addExcelPassengers: () => void;
+  addPhotoPassengers: (source: PassengerPhotoOcrSource) => void;
+  isPhotoImporting: boolean;
+  isTextImporting: boolean;
+  importFeedback: ImportFeedback;
+  photoOcrStatus?: PassengerPhotoOcrStatus;
+  passengerErrors: PassengerEditErrors[];
 }) {
+  const photoImportDisabled = Boolean(photoOcrStatus && !photoOcrStatus.available);
+  const textImportDisabled = photoImportDisabled || isTextImporting || isPhotoImporting;
   return (
-    <Card>
-      <View style={styles.sectionHeader}>
-        <View>
-          <AppText variant="titleLg">Yolcular</AppText>
-          <AppText variant="labelMd" color={colors.textMuted}>
-            {draft.passengers.length} yolcu
-          </AppText>
+    <>
+      <Card>
+        <View style={styles.sectionHeader}>
+          <View>
+            <AppText variant="titleLg">Yolcu Aktar</AppText>
+            <AppText variant="labelMd" color={colors.textMuted}>
+              Yeni aktarım mevcut yolcu listesini değiştirir.
+            </AppText>
+          </View>
+          <View style={styles.inlineActions}>
+            <Button label="Excel" icon="document-text" variant="ghost" onPress={addExcelPassengers} />
+            <Button label="Galeri" icon="images" variant="ghost" loading={isPhotoImporting} disabled={photoImportDisabled || isTextImporting} onPress={() => addPhotoPassengers("library")} />
+            <Button label="Kamera" icon="camera" variant="ghost" loading={isPhotoImporting} disabled={photoImportDisabled || isTextImporting} onPress={() => addPhotoPassengers("camera")} />
+          </View>
         </View>
-        <Button label="Yolcu Ekle" icon="add" variant="ghost" onPress={addPassenger} style={styles.inlineButton} />
-      </View>
-      {draft.passengers.map((passenger, index) => (
-        <PassengerEditCard
-          key={passenger.id}
-          passenger={passenger}
-          index={index}
-          updatePassenger={updatePassenger}
-          removePassenger={removePassenger}
+        {photoOcrStatus?.available === false ? (
+          <View style={styles.notice}>
+            <AppText color={colors.textMuted}>{photoOcrStatus.message}</AppText>
+          </View>
+        ) : null}
+        {isPhotoImporting || isTextImporting ? (
+          <View style={styles.notice}>
+            <AppText color={colors.primary}>AI yolcu listesini okuyor, lütfen bekle.</AppText>
+          </View>
+        ) : null}
+        {importFeedback ? (
+          <View style={[styles.feedbackBox, importFeedback.tone === "success" ? styles.feedbackSuccess : styles.feedbackError]}>
+            <AppText variant="labelLg" color={importFeedback.tone === "success" ? colors.secondary : colors.error}>
+              {importFeedback.message}
+            </AppText>
+          </View>
+        ) : null}
+        <TextField
+          label="Kopyala Yapıştır"
+          value={passengerImportText}
+          onChangeText={setPassengerImportText}
+          multiline
+          placeholder="Ad Soyad - Kimlik/Pasaport"
         />
-      ))}
-    </Card>
+        <Button
+          label="AI ile Metni Ayrıştır"
+          icon="sparkles"
+          variant="secondary"
+          loading={isTextImporting}
+          disabled={textImportDisabled || !passengerImportText.trim()}
+          onPress={addParsedPassengers}
+        />
+      </Card>
+      <Card>
+        <View style={styles.sectionHeader}>
+          <View>
+            <AppText variant="titleLg">Yolcular</AppText>
+            <AppText variant="labelMd" color={colors.textMuted}>
+              {draft.passengers.length} yolcu
+            </AppText>
+          </View>
+          <Button label="Yolcu Ekle" icon="add" variant="ghost" onPress={addPassenger} style={styles.inlineButton} />
+        </View>
+        {draft.passengers.map((passenger, index) => (
+          <PassengerEditCard
+            key={passenger.id}
+            passenger={passenger}
+            index={index}
+            errors={passengerErrors[index] ?? {}}
+            updatePassenger={updatePassenger}
+            removePassenger={removePassenger}
+          />
+        ))}
+      </Card>
+    </>
   );
 }
 
@@ -453,6 +671,8 @@ function LocationFields({
   place,
   cityCode,
   districtCode,
+  locationError,
+  detailError,
   onChange,
   prefix
 }: {
@@ -463,6 +683,8 @@ function LocationFields({
   place: string;
   cityCode: string;
   districtCode: string;
+  locationError?: string;
+  detailError?: string;
   onChange: (patch: Partial<EditDraft>) => void;
   prefix: "departure" | "arrival";
 }) {
@@ -496,8 +718,9 @@ function LocationFields({
         onSelect={selectLocation}
         canUseTextAsPlace={Boolean(cityCode && districtCode)}
         onUseTextAsPlace={(value) => patch("address", value)}
+        error={locationError}
       />
-      <TextField label={title === "Biniş" ? "Biniş adres detayı" : "İniş adres detayı"} value={address} onChangeText={(value) => patch("address", value)} />
+      <TextField label={title === "Biniş" ? "Biniş adres detayı" : "İniş adres detayı"} value={address} onChangeText={(value) => patch("address", value)} error={detailError} />
     </View>
   );
 }
@@ -505,11 +728,13 @@ function LocationFields({
 function PassengerEditCard({
   passenger,
   index,
+  errors,
   updatePassenger,
   removePassenger
 }: {
   passenger: PassengerEditDraft;
   index: number;
+  errors: PassengerEditErrors;
   updatePassenger: (id: string, patch: Partial<PassengerEditDraft>) => void;
   removePassenger: (id: string) => void;
 }) {
@@ -539,10 +764,15 @@ function PassengerEditCard({
         <IconButton icon="trash" label="Yolcuyu sil" onPress={() => removePassenger(passenger.id)} />
       </View>
       <View style={styles.columns}>
-        <TextField label="Ad" value={passenger.first_name} onChangeText={(first_name) => updatePassenger(passenger.id, { first_name })} containerStyle={styles.columnField} />
-        <TextField label="Soyad" value={passenger.last_name} onChangeText={(last_name) => updatePassenger(passenger.id, { last_name })} containerStyle={styles.columnField} />
+        <TextField label="Ad" value={passenger.first_name} onChangeText={(first_name) => updatePassenger(passenger.id, { first_name })} error={errors.first_name} containerStyle={styles.columnField} />
+        <TextField label="Soyad" value={passenger.last_name} onChangeText={(last_name) => updatePassenger(passenger.id, { last_name })} error={errors.last_name} containerStyle={styles.columnField} />
       </View>
       <SegmentedControl options={identityOptions} value={passenger.identity_type} onChange={changeIdentityType} />
+      {errors.identity_type ? (
+        <AppText variant="labelMd" color={colors.error}>
+          {errors.identity_type}
+        </AppText>
+      ) : null}
       <TextField
         label="Kimlik/Pasaport"
         value={passenger.identity_no}
@@ -550,15 +780,17 @@ function PassengerEditCard({
         autoCapitalize="characters"
         keyboardType={passenger.identity_type === "tc" ? "number-pad" : "default"}
         maxLength={passenger.identity_type === "tc" ? 11 : 32}
+        error={errors.identity_no}
       />
       <CountrySelectField
         countryCode={selectedCountry?.code || passenger.nationality}
         countryName={selectedCountry?.name || passenger.country_name}
         disabled={passenger.identity_type === "tc"}
+        error={errors.nationality}
         onSelect={changeCountry}
       />
       <View style={styles.columns}>
-        <SelectField label="Cinsiyet" options={genderOptions} value={passenger.gender} onChange={(gender) => updatePassenger(passenger.id, { gender })} containerStyle={styles.columnField} />
+        <SelectField label="Cinsiyet" options={genderOptions} value={passenger.gender} onChange={(gender) => updatePassenger(passenger.id, { gender })} error={errors.gender} containerStyle={styles.columnField} />
         <TextField label="Koltuk" value={passenger.seat_no} onChangeText={(seat_no) => updatePassenger(passenger.id, { seat_no })} keyboardType="number-pad" containerStyle={styles.columnField} />
       </View>
       <TextField label="Telefon (opsiyonel)" value={passenger.phone} onChangeText={(phone) => updatePassenger(passenger.id, { phone })} keyboardType="phone-pad" />
@@ -762,6 +994,62 @@ function newPassengerDraft(groupId: string): PassengerEditDraft {
   };
 }
 
+function passengerEditDraftFromImport(passenger: ImportedPassenger, groupId: string): PassengerEditDraft {
+  return {
+    id: `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    passenger_id: "",
+    first_name: passenger.first_name || "",
+    last_name: passenger.last_name || "",
+    identity_type: passenger.identity_type || "unknown",
+    identity_no: passenger.identity_no || "",
+    nationality: passenger.nationality || "",
+    country_name: passenger.country_name || "",
+    gender: normalizeGenderCode(passenger.gender),
+    seat_no: passenger.seat_no || "",
+    phone: passenger.phone || "",
+    group_id: groupId,
+    status: "active"
+  };
+}
+
+function getRouteEditErrors(draft: EditDraft): RouteEditErrors {
+  return {
+    departureLocation: draft.departure_city && draft.departure_district && draft.departure_city_code && draft.departure_district_code ? undefined : "Boş bırakılamaz",
+    departureDetail: draft.departure_address.trim() || draft.departure_place.trim() ? undefined : "Boş bırakılamaz",
+    arrivalLocation: draft.arrival_city && draft.arrival_district && draft.arrival_city_code && draft.arrival_district_code ? undefined : "Boş bırakılamaz",
+    arrivalDetail: draft.arrival_address.trim() || draft.arrival_place.trim() ? undefined : "Boş bırakılamaz",
+    groupName: draft.group_name.trim() ? undefined : "Boş bırakılamaz",
+    groupPrice: draft.group_price.trim() ? undefined : "Boş bırakılamaz",
+    groupDescription: draft.group_description.trim() ? undefined : "Boş bırakılamaz"
+  };
+}
+
+function getPassengerEditErrors(draft: EditDraft): PassengerEditErrors[] {
+  return draft.passengers.map((passenger) => {
+    const errors: PassengerEditErrors = {};
+    if (!passenger.first_name.trim()) {
+      errors.first_name = "Boş bırakılamaz";
+    }
+    if (!passenger.last_name.trim()) {
+      errors.last_name = "Boş bırakılamaz";
+    }
+    if (!["tc", "passport"].includes(passenger.identity_type)) {
+      errors.identity_type = "Kimlik tipi seçilmeli.";
+    } else if (!passenger.identity_no.trim()) {
+      errors.identity_no = "Boş bırakılamaz";
+    } else if (passenger.identity_type === "tc" && !isValidTurkishIdentityNo(passenger.identity_no)) {
+      errors.identity_no = "T.C. Kimlik numarası geçersiz.";
+    }
+    if (passenger.identity_type === "passport" && !resolveCountry(passenger.nationality, passenger.country_name)) {
+      errors.nationality = "Ülke seçilmeli.";
+    }
+    if (!normalizeGenderCode(passenger.gender)) {
+      errors.gender = "Cinsiyet seçilmeli.";
+    }
+    return errors;
+  });
+}
+
 function firstStepError(draft: EditDraft, step: number) {
   return stepDraftErrors(draft, step)[0] || "";
 }
@@ -948,6 +1236,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1,
     padding: spacing.sm
+  },
+  inlineActions: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    justifyContent: "flex-end"
+  },
+  feedbackBox: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    padding: spacing.sm
+  },
+  feedbackSuccess: {
+    backgroundColor: colors.secondarySoft,
+    borderColor: colors.secondary
+  },
+  feedbackError: {
+    backgroundColor: colors.errorSoft,
+    borderColor: colors.error
   },
   inlineButton: {
     minHeight: 40,

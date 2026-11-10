@@ -81,7 +81,7 @@ export default function UetdsSettingsScreen() {
           <Badge status={photoOcrStatus.data?.available ? "active" : "passive"} label={photoOcrStatus.data?.available ? "Açık" : "Kapalı"} />
         </View>
         <AppText variant="labelMd" color={colors.textMuted}>
-          {formatAiUsage(photoOcrStatus.data)}
+          {photoOcrStatus.data?.available ? "Fotoğraf ve metinden yolcu listesi ayıklama kullanılabilir." : "AI yolcu ayıklama şu anda kapalı."}
         </AppText>
         {photoOcrStatus.data?.message ? <AppText color={colors.textMuted}>{photoOcrStatus.data.message}</AppText> : null}
       </Card>
@@ -104,14 +104,14 @@ export default function UetdsSettingsScreen() {
       ) : null}
       {verify.data ? (
         <Card>
-          <AppText variant="titleLg">Verify</AppText>
-          <AppText>{JSON.stringify(verify.data, null, 2)}</AppText>
+          <AppText variant="titleLg">Kullanıcı kontrolü tamamlandı</AppText>
+          <AppText color={colors.textMuted}>UETDS kullanıcı kontrolü tamamlandı. Durum kartı güncellendi.</AppText>
         </Card>
       ) : null}
       {ipList.data ? (
         <Card>
-          <AppText variant="titleLg">IP List</AppText>
-          <AppText>{JSON.stringify(ipList.data, null, 2)}</AppText>
+          <AppText variant="titleLg">IP listesi alındı</AppText>
+          <AppText color={colors.textMuted}>UETDS IP listesi başarıyla sorgulandı.</AppText>
         </Card>
       ) : null}
     </Screen>
@@ -153,21 +153,6 @@ function formatNullableDate(value?: string | null) {
 
 function mutationError(error: unknown) {
   return error instanceof Error ? error.message : "";
-}
-
-function formatAiUsage(status?: { token_limit: number; tokens_used: number; tokens_remaining: number | null; usage_month: string }) {
-  if (!status) {
-    return "AI kullanım bilgisi yükleniyor.";
-  }
-  const used = formatTokenCount(status.tokens_used);
-  if (!status.token_limit) {
-    return `Bu ay: ${used} token / limitsiz`;
-  }
-  return `Bu ay: ${used} / ${formatTokenCount(status.token_limit)} token, kalan ${formatTokenCount(status.tokens_remaining || 0)}`;
-}
-
-function formatTokenCount(value: number) {
-  return value.toLocaleString("tr-TR");
 }
 
 const styles = StyleSheet.create({
